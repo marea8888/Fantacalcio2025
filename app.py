@@ -267,6 +267,42 @@ def get_slot_for(nome: str, ruolo: str):
         return None
 
 # ===============================
+# COLORI % TARGET (barre verdi→rosse)
+# ===============================
+
+def _clamp01(x: float) -> float:
+    return max(0.0, min(1.0, float(x)))
+
+
+def _lerp(a: int, b: int, t: float) -> int:
+    return int(round(a + (b - a) * t))
+
+
+def ratio_color_hex(r: float) -> str:
+    """Da 0 (verde) a 1 (rosso). Restituisce es. '#A1B2C3'."""
+    r = _clamp01(r)
+    # verde → rosso (usa un verde un po' brillante e rosso deciso)
+    g_col = (0, 170, 0)
+    r_col = (220, 0, 0)
+    rr = _lerp(g_col[0], r_col[0], r)
+    gg = _lerp(g_col[1], r_col[1], r)
+    bb = _lerp(g_col[2], r_col[2], r)
+    return f"#{rr:02X}{gg:02X}{bb:02X}"
+
+
+def render_ratio_bar(r: float, height: int = 8):
+    """Barra orizzontale colorata in base al rapporto r (0–1)."""
+    r = _clamp01(r)
+    color = ratio_color_hex(r)
+    width_pct = int(round(r * 100))
+    html = f"""
+    <div style='background:#eee;width:100%;height:{height}px;border-radius:6px;overflow:hidden;'>
+      <div style='width:{width_pct}%;height:100%;background:{color};'></div>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
+# ===============================
 # AUTO REFRESH (ogni tot secondi, invisibile)
 # ===============================
 # Valori di default (non esposti a UI, restano in memoria finché non riavvii)
@@ -297,41 +333,32 @@ def apply_auto_refresh():
 apply_auto_refresh()
 
 # ===============================
-# UI: SIDEBAR – RIEPILOGO (aggiornato in tempo reale)
+# UI: SIDEBAR – RIEPILOGO (solo Terzetto Scherzetto)
 # ===============================
 with st.sidebar:
-    st.title("📋 Riepilogo Squadra")
+    # Fissa la squadra seguita all'indice utente (Terzetto Scherzetto al bootstrap)
+    idx = st.session_state.get("user_team_idx", 0)
+    idx = min(idx, len(st.session_state.squadre)-1)
+    my_team = st.session_state.squadre[idx] if st.session_state.squadre else None
 
-    st.session_state.my_team_idx = min(st.session_state.my_team_idx, len(st.session_state.squadre)-1)
-    idx_options = list(range(len(st.session_state.squadre)))
-    sel_idx = st.selectbox(
-        "Segui squadra",
-        idx_options,
-        index=st.session_state.my_team_idx,
-        format_func=lambda i: st.session_state.squadre[i].nome,
-    )
-    st.session_state.my_team_idx = sel_idx
-    my_team = st.session_state.squadre[sel_idx] if st.session_state.squadre else None
+    st.title(f"📋 {my_team.nome if my_team else 'Rosa'}")
 
     if my_team:
         st.metric("Crediti rimasti", crediti_rimasti(my_team))
-        # Monitor budget per reparto (solo per la mia squadra)
-        if sel_idx == st.session_state.get("user_team_idx", -1):
-            st.markdown("**🎯 Budget per reparto (target personale)**")
-            spent = spesa_per_ruolo(my_team)
-            targ = target_per_ruolo(my_team)
-            for r in RUOLI:
-                s = spent.get(r, 0)
-                t = max(targ.get(r, 0), 1)
-                pct = min(s / t, 1.0)
-                st.caption(f"{ROLE_LABELS[r]}: {s}/{t} ({int(round(100*s/t))}%)")
-                st.progress(pct)
-        # Lista per ruolo con contatore (acquisti/slot)
         st.markdown("---")
+        # Liste per ruolo con contatore e monitor % rispetto al target del reparto
+        spent_map = spesa_per_ruolo(my_team)
+        targ_map = target_per_ruolo(my_team)
         for r, label in [("P","Portieri"),("D","Difensori"),("C","Centrocampisti"),("A","Attaccanti")]:
             count = len(my_team.rosa[r])
             quota = st.session_state.settings['quote_rosa'][r]
-            st.markdown(f"**{label} ({count}/{quota})**")
+            s = spent_map.get(r, 0)
+            t = max(targ_map.get(r, 0), 1)  # evita div/0
+            ratio = s / t
+            pct_txt = f"{int(round(100*ratio))}%"
+            st.markdown(f"**{label} ({count}/{quota}) — {s}/{t} ({pct_txt})**")
+            render_ratio_bar(ratio)
+            # Elenco giocatori con Slot
             items = []
             for g in my_team.rosa[r]:
                 _slot = get_slot_for(g.nome, r)
