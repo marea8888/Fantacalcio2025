@@ -523,7 +523,7 @@ with tab_asta:
                         cols_lower = {c.lower(): c for c in df_view.columns}
 
                         # Layout a due colonne: a sinistra card+assegnazione, a destra riepilogo Slot
-                        colL, colR = st.columns([2,1], vertical_alignment="start")
+                        colL, colR = st.columns([2,1], vertical_alignment="top")
 
                         with colL:
                             st.subheader(rec[NAME_COL])
