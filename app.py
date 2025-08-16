@@ -621,9 +621,4 @@ with tab_asta:
     except Exception as e:
         st.error(str(e))
 
-# ===============================
-# FOOTER
-# ===============================
-st.markdown("---")
-st.caption("Doppioni disattivati per design: un giocatore può appartenere a una sola squadra.")
 
