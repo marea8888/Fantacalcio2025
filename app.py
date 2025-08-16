@@ -8,11 +8,20 @@ import streamlit as st
 st.set_page_config(page_title="Fantacalcio – Gestore Lega", page_icon="⚽", layout="wide", initial_sidebar_state="collapsed")
 
 # -------------------------------
-# Modello dati
+# Modello dati / Settings fissati
 # -------------------------------
 RUOLI = ["P", "D", "C", "A"]
 QUOTE_ROSA = {"P": 3, "D": 8, "C": 8, "A": 6}
+SETTINGS = {
+    "num_squadre": 9,
+    "crediti": 700,
+    "quote_rosa": QUOTE_ROSA.copy(),
+    "no_doppioni": True,
+}
 
+# -------------------------------
+# Dataclass
+# -------------------------------
 @dataclass
 class Giocatore:
     nome: str
@@ -41,13 +50,6 @@ class Squadra:
 # -------------------------------
 # Stato iniziale
 # -------------------------------
-SETTINGS = {
-    "num_squadre": 9,
-    "crediti": 700,
-    "quote_rosa": QUOTE_ROSA.copy(),
-    "no_doppioni": True,
-}
-
 if "settings" not in st.session_state:
     st.session_state.settings = SETTINGS.copy()
 
@@ -64,7 +66,7 @@ if "storico_acquisti" not in st.session_state:
     st.session_state.storico_acquisti: List[dict] = []
 
 # -------------------------------
-# Helper
+# Helper funzioni gestione lega
 # -------------------------------
 def quote_rimaste(team: Squadra) -> Dict[str, int]:
     return {r: st.session_state.settings["quote_rosa"][r] - len(team.rosa[r]) for r in RUOLI}
@@ -105,16 +107,6 @@ def rimuovi_giocatore(team: Squadra, ruolo: str, giocatore_nome: str) -> bool:
             return True
     return False
 
-def reset_lega():
-    def _init_default_squadre():
-        s = []
-        for i in range(st.session_state.settings["num_squadre"]):
-            nome = "Terzetto Scherzetto" if i == 0 else f"Squadra {i+1}"
-            s.append(Squadra(nome, st.session_state.settings["crediti"]))
-        return s
-    st.session_state.squadre = _init_default_squadre()
-    st.session_state.storico_acquisti = []
-
 # -------------------------------
 # Header
 # -------------------------------
@@ -122,7 +114,7 @@ st.title("Fantacalcio – Gestore Lega")
 st.caption("Impostazioni fissate da codice: 9 squadre, 700 crediti, rosa 3P/8D/8C/6A, doppioni NON consentiti.")
 
 # -------------------------------
-# Asta corrente – selezione ruolo e lettera alfabetica
+# Asta corrente – ruolo & lettera
 # -------------------------------
 col_a, col_b = st.columns([1,1])
 with col_a:
@@ -135,23 +127,20 @@ with col_b:
     st.session_state["lettera_estratta"] = lettera_norm
 
 # -------------------------------
-# Lettura Google Drive e lista calciatori ordinata
+# Lettura Google Drive & ordinamento
 # -------------------------------
 FILE_ID = "1fbDUNKOmuxsJ_BAd7Sgm-V4tO5UkXXLE"
 
 @st.cache_data(show_spinner=False)
 def load_sheet_from_drive(file_id: str, sheet_name: str) -> pd.DataFrame:
-    """Scarica un Excel da Google Drive e legge il foglio richiesto.
-    Richiede che il file sia condiviso con link pubblico o accessibile.
-    """
-    # Link diretto al contenuto xlsx esportato
     url = f"https://drive.google.com/uc?export=download&id={file_id}"
     try:
         df = pd.read_excel(url, sheet_name=sheet_name)
         return df
-    except ImportError as e:
-        raise RuntimeError("Per leggere file Excel è necessario installare la libreria 'openpyxl'. Esegui: pip install openpyxl")
+    except ImportError:
+        raise RuntimeError("Per leggere file Excel è necessario installare 'openpyxl' (pip install openpyxl)")
 
+@st.cache_data(show_spinner=False)
 def rotate_from_letter(df: pd.DataFrame, col_name: str, letter: str) -> pd.DataFrame:
     if col_name not in df.columns:
         return df
@@ -169,23 +158,75 @@ def rotate_from_letter(df: pd.DataFrame, col_name: str, letter: str) -> pd.DataF
     rotated = pd.concat([rotated, base[~initials.isin(alphabet)]], ignore_index=True)
     return rotated
 
-st.markdown("### 📋 Lista calciatori dal foglio Drive")
+# -------------------------------
+# Carosello calciatori (scroll sx→dx)
+# -------------------------------
+st.markdown("### 🎠 Calciatori (in ordine dalla lettera estratta)")
 try:
     df_raw = load_sheet_from_drive(FILE_ID, ruolo_asta)
     if df_raw.empty:
         st.warning(f"Il foglio '{ruolo_asta}' è vuoto.")
     else:
-        col_name = "name"
-        if col_name not in df_raw.columns:
-            st.error(f"Nel foglio '{ruolo_asta}' non esiste la colonna '{col_name}'.")
+        COL_NAME = "name"
+        if COL_NAME not in df_raw.columns:
+            st.error(f"Nel foglio '{ruolo_asta}' non esiste la colonna '{COL_NAME}'.")
         else:
-            df_view = rotate_from_letter(df_raw, col_name, st.session_state.get("lettera_estratta", ""))
-            st.dataframe(df_view.reset_index(drop=True), use_container_width=True)
+            df_view = rotate_from_letter(df_raw, COL_NAME, st.session_state.get("lettera_estratta", ""))
+            # Pulisci NA e normalizza nomi
+            df_view[COL_NAME] = df_view[COL_NAME].astype(str).fillna("").str.strip()
+            # Stato carosello
+            key_idx = f"car_idx_{ruolo_asta}"
+            if key_idx not in st.session_state:
+                st.session_state[key_idx] = 0
+            cards_per_row = 5
+            total = len(df_view)
+
+            # Controlli carosello
+            c_nav1, c_nav2, c_nav3 = st.columns([1,3,1])
+            with c_nav1:
+                if st.button("◀︎", use_container_width=True, key=f"prev_{ruolo_asta}"):
+                    st.session_state[key_idx] = max(0, st.session_state[key_idx] - cards_per_row)
+            with c_nav2:
+                st.write(f"Mostrati {min(st.session_state[key_idx]+1, total)}–{min(st.session_state[key_idx]+cards_per_row, total)} di {total}")
+            with c_nav3:
+                if st.button("▶︎", use_container_width=True, key=f"next_{ruolo_asta}"):
+                    st.session_state[key_idx] = min(total-1, st.session_state[key_idx] + cards_per_row)
+
+            start = st.session_state[key_idx]
+            end = min(total, start + cards_per_row)
+            row = st.columns(cards_per_row)
+
+            display_cols = [c for c in df_view.columns if c != COL_NAME]
+            # Mostra una riga di card scorrevoli
+            for i, idx in enumerate(range(start, end)):
+                with row[i]:
+                    rec = df_view.iloc[idx]
+                    with st.container(border=True):
+                        st.subheader(rec[COL_NAME])
+                        st.caption(f"Ruolo: {ruolo_asta}")
+                        # Mostra prime 6 info utili
+                        shown = 0
+                        for col in display_cols:
+                            val = rec[col]
+                            if pd.isna(val) or str(val).strip() == "":
+                                continue
+                            st.write(f"**{col}**: {val}")
+                            shown += 1
+                            if shown >= 6:
+                                break
+                        # Pulsante (placeholder per azioni future)
+                        st.button("Seleziona", key=f"sel_{ruolo_asta}_{idx}")
+
+            # Slider rapido per saltare
+            st.slider("Vai alla posizione", 0, max(0, total-1), value=start, key=f"jump_{ruolo_asta}")
+            if st.session_state[f"jump_{ruolo_asta}"] != start:
+                st.session_state[key_idx] = st.session_state[f"jump_{ruolo_asta}"]
+
 except Exception as e:
     st.error(str(e))
 
 # -------------------------------
-# Tabs principali
+# Tabs principali (invariati)
 # -------------------------------
 tab_riepilogo, tab_acquisti, tab_nomi = st.tabs(["📊 Riepilogo", "🛒 Acquisti", "✏️ Nomi"])
 
@@ -208,7 +249,7 @@ with tab_acquisti:
             st.success(f"{nome_g} aggiunto a {team.nome}.")
         else:
             st.error("Impossibile aggiungere il giocatore.")
-    
+
     squadra_r = st.selectbox("Squadra per rimuovere", [t.nome for t in st.session_state.squadre])
     ruolo_r = st.selectbox("Ruolo da cui rimuovere", RUOLI)
     team_r = next(t for t in st.session_state.squadre if t.nome == squadra_r)
