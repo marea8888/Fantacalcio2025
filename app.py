@@ -219,6 +219,39 @@ def rotate_from_letter(df: pd.DataFrame, col_name: str, letter: str) -> pd.DataF
     return rotated
 
 # ===============================
+# LOOKUP SLOT PER GIOCATORE (da fogli Excel)
+# ===============================
+@st.cache_data(show_spinner=False)
+def build_slot_lookup() -> Dict[str, str]:
+    mapping = {}
+    for sheet in RUOLI:
+        try:
+            df = load_sheet_from_drive(sheet)
+            if df is None or df.empty:
+                continue
+            cols_lower = {c.lower(): c for c in df.columns}
+            name_col = cols_lower.get('name')
+            slot_col = cols_lower.get('slot')
+            if not name_col or not slot_col:
+                continue
+            for _, row in df[[name_col, slot_col]].dropna(subset=[name_col]).iterrows():
+                name_str = str(row[name_col]).strip().upper()
+                slot_val = row[slot_col]
+                if pd.isna(slot_val) or str(slot_val).strip() == "":
+                    continue
+                mapping[f"{sheet}|{name_str}"] = str(slot_val)
+        except Exception:
+            continue
+    return mapping
+
+
+def get_slot_for(nome: str, ruolo: str):
+    try:
+        return build_slot_lookup().get(f"{ruolo}|{str(nome).strip().upper()}")
+    except Exception:
+        return None
+
+# ===============================
 # AUTO REFRESH (ogni tot secondi, invisibile)
 # ===============================
 # Valori di default (non esposti a UI, restano in memoria finché non riavvii)
@@ -273,9 +306,15 @@ with st.sidebar:
             count = len(my_team.rosa[r])
             quota = st.session_state.settings['quote_rosa'][r]
             st.markdown(f"**{label} ({count}/{quota})**")
-            names = [f"{g.nome} ({g.prezzo})" for g in my_team.rosa[r]]
-            if names:
-                for n in names:
+            items = []
+            for g in my_team.rosa[r]:
+                _slot = get_slot_for(g.nome, r)
+                if _slot:
+                    items.append(f"{g.nome} — Slot: {_slot} ({g.prezzo})")
+                else:
+                    items.append(f"{g.nome} ({g.prezzo})")
+            if items:
+                for n in items:
                     st.write("• ", n)
             else:
                 st.write("_nessuno_")
