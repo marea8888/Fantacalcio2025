@@ -388,6 +388,9 @@ try:
                             else:
                                 st.error("Impossibile aggiungere il giocatore: controlla crediti/quote/doppioni.")
 
+except Exception as e:
+    st.error(str(e))
+
 # ===============================
 # UI: TABS PRINCIPALI
 # ===============================
