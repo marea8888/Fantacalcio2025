@@ -5,7 +5,7 @@ from typing import List, Dict
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Fantacalcio – Gestore Lega", page_icon="⚽", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Fantacalcio – Gestore Lega", page_icon="⚽", layout="wide", initial_sidebar_state="expanded")
 
 # -------------------------------
 # Modello dati / Settings fissati
@@ -65,6 +65,14 @@ if "squadre" not in st.session_state:
 if "storico_acquisti" not in st.session_state:
     st.session_state.storico_acquisti: List[dict] = []
 
+if "my_team_idx" not in st.session_state:
+    default_idx = 0
+    for i, t in enumerate(st.session_state.squadre):
+        if t.nome == "Terzetto Scherzetto":
+            default_idx = i
+            break
+    st.session_state.my_team_idx = default_idx
+
 # -------------------------------
 # Helper funzioni gestione lega
 # -------------------------------
@@ -106,6 +114,55 @@ def rimuovi_giocatore(team: Squadra, ruolo: str, giocatore_nome: str) -> bool:
             elenco.pop(i)
             return True
     return False
+
+# -------------------------------
+# Sidebar – Riepilogo squadra seguita
+# -------------------------------
+with st.sidebar:
+    st.title("📋 Riepilogo Squadra")
+    st.session_state.my_team_idx = min(st.session_state.my_team_idx, len(st.session_state.squadre)-1)
+    options_idx = list(range(len(st.session_state.squadre)))
+    my_idx = st.selectbox(
+        "Segui squadra",
+        options_idx,
+        index=st.session_state.my_team_idx,
+        format_func=lambda i: st.session_state.squadre[i].nome,
+    )
+    st.session_state.my_team_idx = my_idx
+    my_team = st.session_state.squadre[my_idx] if st.session_state.squadre else None
+
+    if my_team:
+        st.metric("Crediti rimasti", crediti_rimasti(my_team))
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("P", f"{len(my_team.rosa['P'])}/{st.session_state.settings['quote_rosa']['P']}")
+        c2.metric("D", f"{len(my_team.rosa['D'])}/{st.session_state.settings['quote_rosa']['D']}")
+        c3.metric("C", f"{len(my_team.rosa['C'])}/{st.session_state.settings['quote_rosa']['C']}")
+        c4.metric("A", f"{len(my_team.rosa['A'])}/{st.session_state.settings['quote_rosa']['A']}")
+        st.markdown("---")
+        for r, label in [("P","Portieri"),("D","Difensori"),("C","Centrocampisti"),("A","Attaccanti")]:
+            names = [f"{g.nome} ({g.prezzo})" for g in my_team.rosa[r]]
+            if names:
+                st.markdown(f"**{label}**")
+                for n in names:
+                    st.write("• ", n)
+            else:
+                st.markdown(f"**{label}**: _nessuno_")
+        st.markdown("---")
+        spesi = my_team.budget - crediti_rimasti(my_team)
+        st.caption(f"Budget iniziale: {my_team.budget} • Spesi: {spesi}")
+
+        # Box per aggiungere il giocatore selezionato
+        if "selected_player" in st.session_state:
+            sel = st.session_state.selected_player
+            st.subheader("⚡ Acquisto rapido")
+            st.write(f"Giocatore selezionato: **{sel['nome']}** ({sel['ruolo']})")
+            prezzo_sel = st.number_input("Prezzo offerto", min_value=0, step=1, key="prezzo_sel")
+            if st.button("Conferma acquisto"):
+                if aggiungi_giocatore(my_team, sel['nome'], sel['ruolo'], int(prezzo_sel)):
+                    st.success(f"{sel['nome']} aggiunto a {my_team.nome} per {prezzo_sel} crediti.")
+                    del st.session_state["selected_player"]
+                else:
+                    st.error("Impossibile aggiungere il giocatore.")
 
 # -------------------------------
 # Header
@@ -202,7 +259,8 @@ try:
                     if pd.isna(val) or str(val).strip() == "":
                         continue
                     st.write(f"**{col}**: {val}")
-                st.button("Seleziona", key=f"sel_{ruolo_asta}_{idx}")
+                if st.button("Seleziona", key=f"sel_{ruolo_asta}_{idx}"):
+                    st.session_state["selected_player"] = {"nome": rec[COL_NAME], "ruolo": ruolo_asta}
 
 except Exception as e:
     st.error(str(e))
