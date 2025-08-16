@@ -116,15 +116,6 @@ def reset_lega():
     st.session_state.storico_acquisti = []
 
 # -------------------------------
-# Sidebar – Utility Lega
-# -------------------------------
-with st.sidebar:
-    with st.expander("⚙️ Utility Lega", expanded=False):
-        if st.button("🔄 Reset lega (ricrea squadre e azzera acquisti)"):
-            reset_lega()
-            st.warning("Lega resettata.")
-
-# -------------------------------
 # Header
 # -------------------------------
 st.title("Fantacalcio – Gestore Lega")
