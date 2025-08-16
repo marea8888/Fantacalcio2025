@@ -473,7 +473,7 @@ with tab_asta:
     # ===============================
     # UI: CARD GIOCATORE – UNO ALLA VOLTA CON ASSEGNAZIONE DIRETTA
     # ===============================
-    st.markdown("### 🎠 Calciatori (uno alla volta, in ordine dalla lettera estratta)")
+    st.markdown("### Lista Calciatori Disponibili")
     try:
         df_raw = load_sheet_from_drive(ruolo_asta)
         if df_raw.empty:
