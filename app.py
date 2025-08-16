@@ -267,20 +267,18 @@ with st.sidebar:
 
     if my_team:
         st.metric("Crediti rimasti", crediti_rimasti(my_team))
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("P", f"{len(my_team.rosa['P'])}/{st.session_state.settings['quote_rosa']['P']}")
-        c2.metric("D", f"{len(my_team.rosa['D'])}/{st.session_state.settings['quote_rosa']['D']}")
-        c3.metric("C", f"{len(my_team.rosa['C'])}/{st.session_state.settings['quote_rosa']['C']}")
-        c4.metric("A", f"{len(my_team.rosa['A'])}/{st.session_state.settings['quote_rosa']['A']}")
+        # Lista per ruolo con contatore (acquisti/slot)
         st.markdown("---")
         for r, label in [("P","Portieri"),("D","Difensori"),("C","Centrocampisti"),("A","Attaccanti")]:
+            count = len(my_team.rosa[r])
+            quota = st.session_state.settings['quote_rosa'][r]
+            st.markdown(f"**{label} ({count}/{quota})**")
             names = [f"{g.nome} ({g.prezzo})" for g in my_team.rosa[r]]
             if names:
-                st.markdown(f"**{label}**")
                 for n in names:
                     st.write("• ", n)
             else:
-                st.markdown(f"**{label}**: _nessuno_")
+                st.write("_nessuno_")
         st.markdown("---")
         spesi = my_team.budget - crediti_rimasti(my_team)
         st.caption(f"Budget iniziale: {my_team.budget} • Spesi: {spesi}")
