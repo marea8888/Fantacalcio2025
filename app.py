@@ -5,7 +5,7 @@ from typing import List, Dict
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Fantacalcio – Gestore Lega", page_icon="⚽", layout="wide")
+st.set_page_config(page_title="Fantacalcio – Gestore Lega", page_icon="⚽", layout="wide", initial_sidebar_state="collapsed")
 
 # -------------------------------
 # Modello dati
