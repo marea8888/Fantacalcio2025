@@ -397,11 +397,13 @@ with st.sidebar:
 # ===============================
 # UI: HEADER
 # ===============================
-st.title("FantaGioia 2025/2026")
+st.title("Fantacalcio – Gestore Lega")
+st.caption(f"Impostazioni fissate da codice: {st.session_state.settings['num_squadre']} squadre, {st.session_state.settings['crediti']} crediti, rosa 3P/8D/8C/6A, doppioni NON consentiti.")
+
 # ===============================
 # UI: TABS PRINCIPALI (in alto)
 # ===============================
-tab_asta, tab_riepilogo, tab_acquisti, tab_nomi = st.tabs(["🔨 Asta", "📊 Riepilogo Squadre", "🛒 Acquisti", "✏️ Nomi Squadre"])
+tab_asta, tab_riepilogo, tab_acquisti, tab_nomi = st.tabs(["🔨 Asta", "📊 Riepilogo", "🛒 Acquisti", "✏️ Nomi"])
 
 with tab_riepilogo:
     for team in st.session_state.squadre:
@@ -471,7 +473,7 @@ with tab_asta:
     # ===============================
     # UI: CARD GIOCATORE – UNO ALLA VOLTA CON ASSEGNAZIONE DIRETTA
     # ===============================
-    st.markdown("### Lista Calciatori Disponibili")
+    st.markdown("### 🎠 Calciatori (uno alla volta, in ordine dalla lettera estratta)")
     try:
         df_raw = load_sheet_from_drive(ruolo_asta)
         if df_raw.empty:
@@ -517,106 +519,143 @@ with tab_asta:
 
                     # CARD
                     with st.container(border=True):
-                        st.subheader(rec[NAME_COL])
-                        st.caption(f"Ruolo: {ruolo_asta}")
-
-                        # Mostra SOLO i campi richiesti (case-insensitive)
+                        # Mappa colonne (riuso in entrambi i lati)
                         cols_lower = {c.lower(): c for c in df_view.columns}
-                        for key_lower, label in FIELD_LABELS.items():
-                            real_col = cols_lower.get(key_lower)
-                            if not real_col:
-                                continue
-                            val = rec[real_col]
-                            if pd.isna(val) or str(val).strip() == "":
-                                continue
-                            st.write(f"**{label}**: {val}")
 
-                        st.markdown("---")
-                        st.subheader("📝 Assegna a squadra")
-                        team_options = list(range(len(st.session_state.squadre)))
-                        sel_team_idx = st.selectbox(
-                            "Scegli squadra",
-                            team_options,
-                            index=min(st.session_state.my_team_idx, len(team_options)-1) if team_options else 0,
-                            format_func=lambda i: st.session_state.squadre[i].nome if team_options else "",
-                            key=f"sel_team_{ruolo_asta}_{idx}"
-                        )
-                        prezzo_sel = st.number_input("Prezzo di aggiudicazione", min_value=0, step=1, key=f"prezzo_{ruolo_asta}_{idx}")
+                        # Layout a due colonne: a sinistra card+assegnazione, a destra riepilogo Slot
+                        colL, colR = st.columns([2,1], vertical_alignment="start")
 
-                        # Commento spiritoso vs range stimato del giocatore (inline, senza dipendenze esterne)
-                        rng_col = cols_lower.get('pfcrange')
-                        rng_val = None
-                        try:
-                            rng_val = rec[rng_col] if rng_col else None
-                        except Exception:
+                        with colL:
+                            st.subheader(rec[NAME_COL])
+                            st.caption(f"Ruolo: {ruolo_asta}")
+
+                            # Mostra SOLO i campi richiesti (case-insensitive)
+                            for key_lower, label in FIELD_LABELS.items():
+                                real_col = cols_lower.get(key_lower)
+                                if not real_col:
+                                    continue
+                                val = rec[real_col]
+                                if pd.isna(val) or str(val).strip() == "":
+                                    continue
+                                st.write(f"**{label}**: {val}")
+
+                            st.markdown("---")
+                            st.subheader("📝 Assegna a squadra")
+                            team_options = list(range(len(st.session_state.squadre)))
+                            sel_team_idx = st.selectbox(
+                                "Scegli squadra",
+                                team_options,
+                                index=min(st.session_state.my_team_idx, len(team_options)-1) if team_options else 0,
+                                format_func=lambda i: st.session_state.squadre[i].nome if team_options else "",
+                                key=f"sel_team_{ruolo_asta}_{idx}"
+                            )
+                            prezzo_sel = st.number_input("Prezzo di aggiudicazione", min_value=0, step=1, key=f"prezzo_{ruolo_asta}_{idx}")
+
+                            # Commento spiritoso vs range stimato del giocatore (inline, senza dipendenze esterne)
+                            rng_col = cols_lower.get('pfcrange')
                             rng_val = None
+                            try:
+                                rng_val = rec[rng_col] if rng_col else None
+                            except Exception:
+                                rng_val = None
 
-                        def _extract_ints(text):
-                            if text is None:
-                                return []
-                            s = str(text)
-                            out, buf = [], ""
-                            for ch in s:
-                                if ch.isdigit():
-                                    buf += ch
+                            def _extract_ints(text):
+                                if text is None:
+                                    return []
+                                s = str(text)
+                                out, buf = [], ""
+                                for ch in s:
+                                    if ch.isdigit():
+                                        buf += ch
+                                    else:
+                                        if buf:
+                                            out.append(int(buf))
+                                            buf = ""
+                                if buf:
+                                    out.append(int(buf))
+                                return out
+
+                            nums = _extract_ints(rng_val)
+                            low = high = None
+                            if len(nums) >= 2:
+                                a, b = nums[0], nums[1]
+                                low, high = (a, b) if a <= b else (b, a)
+                            elif len(nums) == 1:
+                                low = high = nums[0]
+
+                            if low is not None and high is not None:
+                                price_now = int(prezzo_sel)
+                                if price_now <= max(1, int(low * 0.90)):
+                                    st.success(f"Colpaccio!! 🎯 ({price_now} vs range {low}-{high})")
+                                elif price_now < low:
+                                    st.success(f"Ottimo prezzo ✅ ({price_now} sotto {low}-{high})")
+                                elif low <= price_now <= high:
+                                    st.info(f"Prezzo in linea col mercato 👍 ({low}-{high})")
+                                elif price_now <= int(high * 1.15):
+                                    st.warning(f"Sovrapprezzo leggero 🤏 ({price_now} oltre {high})")
                                 else:
-                                    if buf:
-                                        out.append(int(buf))
-                                        buf = ""
-                            if buf:
-                                out.append(int(buf))
-                            return out
+                                    st.error(f"Fuori mercato 💸 ({price_now} >> {high})")
 
-                        nums = _extract_ints(rng_val)
-                        low = high = None
-                        if len(nums) >= 2:
-                            a, b = nums[0], nums[1]
-                            low, high = (a, b) if a <= b else (b, a)
-                        elif len(nums) == 1:
-                            low = high = nums[0]
-
-                        if low is not None and high is not None:
-                            price_now = int(prezzo_sel)
-                            if price_now <= max(1, int(low * 0.90)):
-                                st.success(f"Colpaccio!! 🎯 ({price_now} vs range {low}-{high})")
-                            elif price_now < low:
-                                st.success(f"Ottimo prezzo ✅ ({price_now} sotto {low}-{high})")
-                            elif low <= price_now <= high:
-                                st.info(f"Prezzo in linea col mercato 👍 ({low}-{high})")
-                            elif price_now <= int(high * 1.15):
-                                st.warning(f"Sovrapprezzo leggero 🤏 ({price_now} oltre {high})")
-                            else:
-                                st.error(f"Fuori mercato 💸 ({price_now} >> {high})")
-
-                        # Monitor spesa reparto per la mia squadra (preview post-acquisto)
-                        if sel_team_idx == st.session_state.get("user_team_idx", -1):
-                            team_sel = st.session_state.squadre[sel_team_idx]
-                            curr = spesa_per_ruolo(team_sel).get(ruolo_asta, 0)
-                            targ = target_per_ruolo(team_sel).get(ruolo_asta, 0)
-                            projected = curr + int(prezzo_sel)
-                            label_ruolo = ROLE_LABELS.get(ruolo_asta, ruolo_asta)
-                            if targ > 0:
-                                pct_now = int(round(100*curr/targ))
-                                pct_proj = int(round(100*projected/targ))
-                                st.info(f"{label_ruolo}: ora {curr}/{targ} ({pct_now}%) • dopo acquisto {projected}/{targ} ({pct_proj}%)")
-                                if projected > targ:
-                                    st.warning(f"Superi il target {label_ruolo} di {projected - targ} crediti.")
-
-                        if st.button("Aggiungi alla squadra", key=f"add_{ruolo_asta}_{idx}"):
-                            if st.session_state.squadre:
+                            # Monitor spesa reparto per la mia squadra (preview post-acquisto)
+                            if sel_team_idx == st.session_state.get("user_team_idx", -1):
                                 team_sel = st.session_state.squadre[sel_team_idx]
-                                ok = aggiungi_giocatore(team_sel, rec[NAME_COL], ruolo_asta, int(prezzo_sel))
-                                if ok:
-                                    st.success(f"{rec[NAME_COL]} aggiunto a {team_sel.nome} per {int(prezzo_sel)}.")
-                                    # Avanza e ricarica per rimuovere subito il giocatore dalla lista
-                                    st.session_state[key_idx] = min(total-1, st.session_state[key_idx]+1)
-                                    try:
-                                        st.rerun()
-                                    except Exception:
-                                        st.experimental_rerun()
+                                curr = spesa_per_ruolo(team_sel).get(ruolo_asta, 0)
+                                targ = target_per_ruolo(team_sel).get(ruolo_asta, 0)
+                                projected = curr + int(prezzo_sel)
+                                label_ruolo = ROLE_LABELS.get(ruolo_asta, ruolo_asta)
+                                if targ > 0:
+                                    pct_now = int(round(100*curr/targ))
+                                    pct_proj = int(round(100*projected/targ))
+                                    st.info(f"{label_ruolo}: ora {curr}/{targ} ({pct_now}%) • dopo acquisto {projected}/{targ} ({pct_proj}%)")
+                                    if projected > targ:
+                                        st.warning(f"Superi il target {label_ruolo} di {projected - targ} crediti.")
+
+                            if st.button("Aggiungi alla squadra", key=f"add_{ruolo_asta}_{idx}"):
+                                if st.session_state.squadre:
+                                    team_sel = st.session_state.squadre[sel_team_idx]
+                                    ok = aggiungi_giocatore(team_sel, rec[NAME_COL], ruolo_asta, int(prezzo_sel))
+                                    if ok:
+                                        st.success(f"{rec[NAME_COL]} aggiunto a {team_sel.nome} per {int(prezzo_sel)}.")
+                                        # Avanza e ricarica per rimuovere subito il giocatore dalla lista
+                                        st.session_state[key_idx] = min(total-1, st.session_state[key_idx]+1)
+                                        try:
+                                            st.rerun()
+                                        except Exception:
+                                            st.experimental_rerun()
+                                    else:
+                                        st.error("Impossibile aggiungere il giocatore: controlla crediti/quote/doppioni.")
+
+                        with colR:
+                            st.subheader("📊 Disponibilità per Slot")
+                            # Quante squadre sono ancora in gara (non hanno completato il reparto)
+                            try:
+                                quota = st.session_state.settings['quote_rosa'][ruolo_asta]
+                                squadre_in_gara = sum(1 for t in st.session_state.squadre if len(t.rosa[ruolo_asta]) < quota)
+                                st.caption(f"In gara (squadre non complete): {squadre_in_gara}")
+                            except Exception:
+                                st.caption("In gara: n/d")
+
+                            slot_col = cols_lower.get('slot')
+                            if slot_col and slot_col in df_view.columns:
+                                ser = df_view[slot_col].dropna().astype(str).str.strip()
+                                if len(ser) == 0:
+                                    st.write("_Nessun dato disponibile_")
                                 else:
-                                    st.error("Impossibile aggiungere il giocatore: controlla crediti/quote/doppioni.")
+                                    order = pd.DataFrame({'slot': ser}).drop_duplicates()
+                                    order['slot_num'] = pd.to_numeric(order['slot'], errors='coerce')
+                                    order = order.sort_values(['slot_num','slot'], na_position='last')
+                                    counts = ser.value_counts()
+                                    for val in order['slot']:
+                                        cnt = int(counts.get(val, 0))
+                                        st.write(f"• Slot {val}: {cnt} disponibili")
+                            else:
+                                st.caption("Colonna 'Slot' assente nel file.")
     except Exception as e:
         st.error(str(e))
 
+# ===============================
+# FOOTER
+# ===============================
+st.markdown("---")
+st.caption("Doppioni disattivati per design: un giocatore può appartenere a una sola squadra.")
 
