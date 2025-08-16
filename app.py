@@ -5,7 +5,7 @@ from typing import List, Dict
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Fantacalcio – Gestore Lega", page_icon="⚽", layout="wide")
+st.set_page_config(page_title="Fantacalcio – Gestore Lega", page_icon="⚽", layout="wide", initial_sidebar_state="collapsed")
 
 # -------------------------------
 # Modello dati
@@ -34,7 +34,7 @@ class Squadra:
 
     @staticmethod
     def from_dict(d: dict) -> "Squadra":
-        s = Squadra(d["nome"], d["budget"]) 
+        s = Squadra(d["nome"], d["budget"])
         s.rosa = {r: [Giocatore(**g) for g in d["rosa"].get(r, [])] for r in RUOLI}
         return s
 
@@ -69,11 +69,11 @@ if "storico_acquisti" not in st.session_state:
 # (funzioni helper come prima...)
 
 # -------------------------------
-# Utility Lega (collapsible expander invece che sidebar)
+# Sidebar – Utility Lega
 # -------------------------------
-with st.expander("⚙️ Utility Lega", expanded=False):
+with st.sidebar:
+    st.title("⚙️ Utility Lega")
     if st.button("🔄 Reset lega (ricrea squadre e azzera acquisti)"):
-        # reset_lega() dovrebbe essere definita come prima
         reset_lega()
         st.warning("Lega resettata.")
 
