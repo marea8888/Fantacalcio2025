@@ -144,44 +144,25 @@ def load_sheet_from_drive(file_id: str, sheet_name: str) -> pd.DataFrame:
     """Scarica un Excel da Google Drive e legge il foglio richiesto.
     Richiede che il file sia condiviso con link pubblico o accessibile.
     """
-    url = f"https://drive.google.com/uc?id={file_id}"
-    try:
-        # Prova a leggere direttamente l'URL (funziona se il file è pubblico)
-        df = pd.read_excel(url, sheet_name=sheet_name, engine="openpyxl")
-        return df
-    except Exception:
-        # Fallback via gdown (se disponibile) per scaricare localmente
-        try:
-            import gdown  # type: ignore
-            out_path = f"/tmp/{file_id}.xlsx"
-            gdown.download(url, out_path, quiet=True)
-            df = pd.read_excel(out_path, sheet_name=sheet_name, engine="openpyxl")
-            return df
-        except Exception as e:
-            raise RuntimeError(f"Impossibile leggere il file/sheet da Google Drive: {e}")
+    # Link diretto al contenuto xlsx esportato
+    url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    df = pd.read_excel(url, sheet_name=sheet_name, engine="openpyxl")
+    return df
 
 def rotate_from_letter(df: pd.DataFrame, col_name: str, letter: str) -> pd.DataFrame:
     if col_name not in df.columns:
         return df
-    # Ordine alfabetico base
     base = df.sort_values(col_name, key=lambda s: s.astype(str).str.upper()).reset_index(drop=True)
     if not letter or len(letter) != 1 or not letter.isalpha():
         return base
-    # Partiziona per iniziale della colonna (A-Z), ignorando spazi/acc.
     initials = base[col_name].astype(str).str.strip().str.upper().str[0]
     letter = letter.upper()
-    # Due blocchi: dalla lettera in poi, poi il resto
-    mask = initials >= letter
-    # Ma vogliamo l'ordine circolare esatto per iniziale, non lexicografico per intera stringa.
-    # Quindi costruiamo un ordine custom per le iniziali A..Z a partire da 'letter'
     alphabet = [chr(c) for c in range(ord('A'), ord('Z')+1)]
     order = alphabet[alphabet.index(letter):] + alphabet[:alphabet.index(letter)]
-    # Raggruppa per iniziale e concatena secondo 'order'
     frames = []
     for ch in order:
         frames.append(base[initials == ch])
     rotated = pd.concat(frames, ignore_index=True)
-    # Aggiungi eventuali valori con iniziale non alfabetica in fondo
     rotated = pd.concat([rotated, base[~initials.isin(alphabet)]], ignore_index=True)
     return rotated
 
