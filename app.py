@@ -289,7 +289,7 @@ with st.sidebar:
 # UI: HEADER
 # ===============================
 st.title("Fantacalcio – Gestore Lega")
-st.caption("Impostazioni fissate da codice: 10 squadre, 700 crediti, rosa 3P/8D/8C/6A, doppioni NON consentiti.")
+st.caption(f"Impostazioni fissate da codice: {st.session_state.settings['num_squadre']} squadre, {st.session_state.settings['crediti']} crediti, rosa 3P/8D/8C/6A, doppioni NON consentiti.")
 
 # ===============================
 # UI: TABS PRINCIPALI (in alto)
@@ -308,7 +308,7 @@ with tab_acquisti:
     nome_g = st.text_input("Nome giocatore")
     ruolo_g = st.selectbox("Ruolo", RUOLI)
     prezzo_g = st.number_input("Prezzo", min_value=0, step=1)
-    dest_name = st.selectbox("Squadra", [t.nome for t in st.session_state.squadre])
+    dest_name = st.selectbox("Squadra", [t.nome for t in st.session_state.squadre], key="dest_name_sel")
     if st.button("Aggiungi"):
         team = next(t for t in st.session_state.squadre if t.nome == dest_name)
         if aggiungi_giocatore(team, nome_g, ruolo_g, int(prezzo_g)):
@@ -316,10 +316,10 @@ with tab_acquisti:
         else:
             st.error("Impossibile aggiungere il giocatore.")
 
-    squadra_r = st.selectbox("Squadra per rimuovere", [t.nome for t in st.session_state.squadre])
-    ruolo_r = st.selectbox("Ruolo da cui rimuovere", RUOLI)
+    squadra_r = st.selectbox("Squadra per rimuovere", [t.nome for t in st.session_state.squadre], key="squadra_r_sel")
+    ruolo_r = st.selectbox("Ruolo da cui rimuovere", RUOLI, key="ruolo_r_sel")
     team_r = next(t for t in st.session_state.squadre if t.nome == squadra_r)
-    gioc_r = st.selectbox("Giocatore", [g.nome for g in team_r.rosa[ruolo_r]] if team_r.rosa[ruolo_r] else ["—"])
+    gioc_r = st.selectbox("Giocatore", [g.nome for g in team_r.rosa[ruolo_r]] if team_r.rosa[ruolo_r] else ["—"], key="gioc_r_sel")
     if st.button("Rimuovi"):
         if gioc_r != "—" and rimuovi_giocatore(team_r, ruolo_r, gioc_r):
             st.success(f"{gioc_r} rimosso da {team_r.nome}.")
@@ -457,6 +457,4 @@ with tab_asta:
 # ===============================
 st.markdown("---")
 st.caption("Doppioni disattivati per design: un giocatore può appartenere a una sola squadra.")
-# ===============================
-st.markdown("---")
-st.caption("Doppioni disattivati per design: un giocatore può appartenere a una sola squadra.")
+
