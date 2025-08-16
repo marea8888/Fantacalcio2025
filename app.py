@@ -205,6 +205,36 @@ def rotate_from_letter(df: pd.DataFrame, col_name: str, letter: str) -> pd.DataF
     return rotated
 
 # ===============================
+# AUTO REFRESH (ogni tot secondi, invisibile)
+# ===============================
+# Valori di default (non esposti a UI, restano in memoria finché non riavvii)
+if "settings" in st.session_state:
+    st.session_state.settings.setdefault("auto_refresh_enabled", True)
+    st.session_state.settings.setdefault("auto_refresh_ms", 5000)  # 5 secondi
+
+
+def apply_auto_refresh():
+    """Forza il rerun della pagina automaticamente ogni N ms.
+    Usa streamlit-autorefresh se disponibile, altrimenti fallback JS.
+    """
+    enabled = st.session_state.settings.get("auto_refresh_enabled", True)
+    interval_ms = int(st.session_state.settings.get("auto_refresh_ms", 5000))
+    if not enabled:
+        return
+    try:
+        from streamlit_autorefresh import st_autorefresh  # type: ignore
+        st_autorefresh(interval=interval_ms, key="auto_refresh")
+    except Exception:
+        # Fallback senza dipendenze
+        st.markdown(
+            f"<script>setTimeout(function(){{window.location.reload();}}, {interval_ms});</script>",
+            unsafe_allow_html=True,
+        )
+
+# Applica subito l'auto refresh
+apply_auto_refresh()
+
+# ===============================
 # UI: SIDEBAR – RIEPILOGO (aggiornato in tempo reale)
 # ===============================
 with st.sidebar:
