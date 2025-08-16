@@ -1,6 +1,7 @@
 import json
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -70,31 +71,61 @@ class Squadra:
         return s
 
 # ===============================
-# STATO INIZIALE
+# PERSISTENZA SU FILE (memoria fino al reboot)
 # ===============================
-if "settings" not in st.session_state:
-    st.session_state.settings = SETTINGS.copy()
+PERSIST_PATH = Path("lega_state.json")
 
-if "squadre" not in st.session_state:
-    def _init_default_squadre() -> List[Squadra]:
-        arr = []
-        for i in range(st.session_state.settings["num_squadre"]):
-            nome = "Terzetto Scherzetto" if i == 0 else f"Squadra {i+1}"
-            arr.append(Squadra(nome, st.session_state.settings["crediti"]))
-        return arr
-    st.session_state.squadre = _init_default_squadre()
+def save_state():
+    try:
+        payload = {
+            "settings": st.session_state.get("settings", SETTINGS.copy()),
+            "squadre": [s.to_dict() for s in st.session_state.get("squadre", [])],
+            "storico": st.session_state.get("storico_acquisti", []),
+            "my_team_idx": st.session_state.get("my_team_idx", 0),
+        }
+        PERSIST_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass  # evita crash se il file non è scrivibile
 
-if "storico_acquisti" not in st.session_state:
-    st.session_state.storico_acquisti: List[dict] = []
+def load_state():
+    try:
+        if PERSIST_PATH.exists():
+            data = json.loads(PERSIST_PATH.read_text(encoding="utf-8"))
+            st.session_state.settings = data.get("settings", SETTINGS.copy())
+            st.session_state.squadre = [Squadra.from_dict(d) for d in data.get("squadre", [])]
+            st.session_state.storico_acquisti = data.get("storico", [])
+            st.session_state.my_team_idx = data.get("my_team_idx", 0)
+            return True
+    except Exception:
+        pass
+    return False
 
-# squadra seguita (robusto ai rinomini: salviamo l'indice)
-if "my_team_idx" not in st.session_state:
-    default_idx = 0
-    for i, t in enumerate(st.session_state.squadre):
-        if t.nome == "Terzetto Scherzetto":
-            default_idx = i
-            break
-    st.session_state.my_team_idx = default_idx
+# ===============================
+# STATO INIZIALE (bootstrap una sola volta)
+# ===============================
+if "_boot" not in st.session_state:
+    loaded = load_state()
+    if not loaded:
+        # Settings fissi
+        st.session_state.settings = SETTINGS.copy()
+        # Squadre di default
+        def _init_default_squadre() -> List[Squadra]:
+            arr = []
+            for i in range(st.session_state.settings["num_squadre"]):
+                nome = "Terzetto Scherzetto" if i == 0 else f"Squadra {i+1}"
+                arr.append(Squadra(nome, st.session_state.settings["crediti"]))
+            return arr
+        st.session_state.squadre = _init_default_squadre()
+        st.session_state.storico_acquisti = []
+        # Segui di default Terzetto Scherzetto
+        default_idx = 0
+        for i, t in enumerate(st.session_state.squadre):
+            if t.nome == "Terzetto Scherzetto":
+                default_idx = i
+                break
+        st.session_state.my_team_idx = default_idx
+        save_state()
+    st.session_state._boot = True
 
 # ===============================
 # FUNZIONI LEGA
@@ -133,6 +164,7 @@ def aggiungi_giocatore(team: Squadra, nome: str, ruolo: str, prezzo: int) -> boo
         "ruolo": ruolo,
         "prezzo": prezzo,
     })
+    save_state()
     return True
 
 
@@ -141,6 +173,7 @@ def rimuovi_giocatore(team: Squadra, ruolo: str, giocatore_nome: str) -> bool:
     for i, g in enumerate(elenco):
         if g.nome == giocatore_nome:
             elenco.pop(i)
+            save_state()
             return True
     return False
 
@@ -172,7 +205,7 @@ def rotate_from_letter(df: pd.DataFrame, col_name: str, letter: str) -> pd.DataF
     return rotated
 
 # ===============================
-# UI: SIDEBAR – RIEPILOGO + ASSEGNAZIONE RAPIDA
+# UI: SIDEBAR – RIEPILOGO (aggiornato in tempo reale)
 # ===============================
 with st.sidebar:
     st.title("📋 Riepilogo Squadra")
@@ -208,25 +241,6 @@ with st.sidebar:
         spesi = my_team.budget - crediti_rimasti(my_team)
         st.caption(f"Budget iniziale: {my_team.budget} • Spesi: {spesi}")
 
-        st.markdown("---")
-        st.subheader("📝 Assegna giocatore selezionato")
-        pending = st.session_state.get("pending_player")
-        if pending:
-            st.write(f"Giocatore: **{pending['nome']}** • Ruolo: **{pending['ruolo']}**")
-            prezzo_sel = st.number_input("Prezzo di aggiudicazione", min_value=0, step=1, key="prezzo_sel")
-            if st.button("Aggiungi alla squadra seguita", key="add_pending"):
-                ok = aggiungi_giocatore(my_team, pending['nome'], pending['ruolo'], int(prezzo_sel))
-                if ok:
-                    st.success(f"{pending['nome']} aggiunto a {my_team.nome} per {int(prezzo_sel)}.")
-                    key_idx = f"car_idx_{st.session_state.get('ruolo_asta','P')}"
-                    if key_idx in st.session_state:
-                        st.session_state[key_idx] = min(st.session_state[key_idx] + 1, 10**9)
-                    st.session_state.pop("pending_player", None)
-                else:
-                    st.error("Impossibile aggiungere il giocatore: controlla crediti/quote/doppioni.")
-        else:
-            st.caption("Nessun giocatore selezionato: usa il pulsante 'Seleziona' nella card principale.")
-
 # ===============================
 # UI: HEADER
 # ===============================
@@ -256,7 +270,7 @@ with col_b:
     st.session_state["lettera_estratta"] = (lettera_input or "").upper()
 
 # ===============================
-# UI: CARD GIOCATORE – UNO ALLA VOLTA
+# UI: CARD GIOCATORE – UNO ALLA VOLTA CON ASSEGNAZIONE DIRETTA
 # ===============================
 st.markdown("### 🎠 Calciatori (uno alla volta, in ordine dalla lettera estratta)")
 try:
@@ -294,7 +308,7 @@ try:
                 st.subheader(rec[NAME_COL])
                 st.caption(f"Ruolo: {ruolo_asta}")
 
-                # Mostra SOLO i campi richiesti
+                # Mostra SOLO i campi richiesti (case-insensitive)
                 cols_lower = {c.lower(): c for c in df_view.columns}
                 for key_lower, label in FIELD_LABELS.items():
                     real_col = cols_lower.get(key_lower)
@@ -305,9 +319,26 @@ try:
                         continue
                     st.write(f"**{label}**: {val}")
 
-                if st.button("Seleziona", key=f"sel_{ruolo_asta}_{idx}"):
-                    st.session_state["pending_player"] = {"nome": rec[NAME_COL], "ruolo": ruolo_asta}
-                    st.success(f"Selezionato {rec[NAME_COL]} → apri la sidebar per assegnarlo.")
+                st.markdown("---")
+                st.subheader("📝 Assegna a squadra")
+                team_options = list(range(len(st.session_state.squadre)))
+                sel_team_idx = st.selectbox(
+                    "Scegli squadra",
+                    team_options,
+                    index=min(st.session_state.my_team_idx, len(team_options)-1) if team_options else 0,
+                    format_func=lambda i: st.session_state.squadre[i].nome if team_options else "",
+                    key=f"sel_team_{ruolo_asta}_{idx}"
+                )
+                prezzo_sel = st.number_input("Prezzo di aggiudicazione", min_value=0, step=1, key=f"prezzo_{ruolo_asta}_{idx}")
+                if st.button("Aggiungi alla squadra", key=f"add_{ruolo_asta}_{idx}"):
+                    if st.session_state.squadre:
+                        team_sel = st.session_state.squadre[sel_team_idx]
+                        ok = aggiungi_giocatore(team_sel, rec[NAME_COL], ruolo_asta, int(prezzo_sel))
+                        if ok:
+                            st.success(f"{rec[NAME_COL]} aggiunto a {team_sel.nome} per {int(prezzo_sel)}.")
+                            st.session_state[key_idx] = min(total-1, st.session_state[key_idx]+1)
+                        else:
+                            st.error("Impossibile aggiungere il giocatore: controlla crediti/quote/doppioni.")
 
 except Exception as e:
     st.error(str(e))
@@ -357,6 +388,7 @@ with tab_nomi:
             else:
                 team.nome = nuovo_nome
                 st.success(f"Nome aggiornato: {team.nome}")
+                save_state()
 
 st.markdown("---")
 st.caption("Doppioni disattivati per design: un giocatore può appartenere a una sola squadra.")
