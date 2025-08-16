@@ -131,13 +131,74 @@ with col_a:
 with col_b:
     st.subheader("Lettera estratta")
     lettera_input = st.text_input("Inserisci la lettera alfabetica estratta (A–Z)", value=st.session_state.get("lettera_estratta", ""), max_chars=1)
-    # Normalizza a maiuscolo
     lettera_norm = (lettera_input or "").upper()
     st.session_state["lettera_estratta"] = lettera_norm
-    if lettera_norm:
-        st.info(f"Asta per ruolo **{ruolo_asta}** con lettera **{lettera_norm}**.")
+
+# -------------------------------
+# Lettura Google Drive e lista calciatori ordinata
+# -------------------------------
+FILE_ID = "1fbDUNKOmuxsJ_BAd7Sgm-V4tO5UkXXLE"
+
+@st.cache_data(show_spinner=False)
+def load_sheet_from_drive(file_id: str, sheet_name: str) -> pd.DataFrame:
+    """Scarica un Excel da Google Drive e legge il foglio richiesto.
+    Richiede che il file sia condiviso con link pubblico o accessibile.
+    """
+    url = f"https://drive.google.com/uc?id={file_id}"
+    try:
+        # Prova a leggere direttamente l'URL (funziona se il file è pubblico)
+        df = pd.read_excel(url, sheet_name=sheet_name, engine="openpyxl")
+        return df
+    except Exception:
+        # Fallback via gdown (se disponibile) per scaricare localmente
+        try:
+            import gdown  # type: ignore
+            out_path = f"/tmp/{file_id}.xlsx"
+            gdown.download(url, out_path, quiet=True)
+            df = pd.read_excel(out_path, sheet_name=sheet_name, engine="openpyxl")
+            return df
+        except Exception as e:
+            raise RuntimeError(f"Impossibile leggere il file/sheet da Google Drive: {e}")
+
+def rotate_from_letter(df: pd.DataFrame, col_name: str, letter: str) -> pd.DataFrame:
+    if col_name not in df.columns:
+        return df
+    # Ordine alfabetico base
+    base = df.sort_values(col_name, key=lambda s: s.astype(str).str.upper()).reset_index(drop=True)
+    if not letter or len(letter) != 1 or not letter.isalpha():
+        return base
+    # Partiziona per iniziale della colonna (A-Z), ignorando spazi/acc.
+    initials = base[col_name].astype(str).str.strip().str.upper().str[0]
+    letter = letter.upper()
+    # Due blocchi: dalla lettera in poi, poi il resto
+    mask = initials >= letter
+    # Ma vogliamo l'ordine circolare esatto per iniziale, non lexicografico per intera stringa.
+    # Quindi costruiamo un ordine custom per le iniziali A..Z a partire da 'letter'
+    alphabet = [chr(c) for c in range(ord('A'), ord('Z')+1)]
+    order = alphabet[alphabet.index(letter):] + alphabet[:alphabet.index(letter)]
+    # Raggruppa per iniziale e concatena secondo 'order'
+    frames = []
+    for ch in order:
+        frames.append(base[initials == ch])
+    rotated = pd.concat(frames, ignore_index=True)
+    # Aggiungi eventuali valori con iniziale non alfabetica in fondo
+    rotated = pd.concat([rotated, base[~initials.isin(alphabet)]], ignore_index=True)
+    return rotated
+
+st.markdown("### 📋 Lista calciatori dal foglio Drive")
+try:
+    df_raw = load_sheet_from_drive(FILE_ID, ruolo_asta)
+    if df_raw.empty:
+        st.warning(f"Il foglio '{ruolo_asta}' è vuoto.")
     else:
-        st.info(f"Asta per ruolo **{ruolo_asta}**. Inserisci una lettera per procedere con le regole che definirai.")
+        col_name = "name"
+        if col_name not in df_raw.columns:
+            st.error(f"Nel foglio '{ruolo_asta}' non esiste la colonna '{col_name}'.")
+        else:
+            df_view = rotate_from_letter(df_raw, col_name, st.session_state.get("lettera_estratta", ""))
+            st.dataframe(df_view.reset_index(drop=True), use_container_width=True)
+except Exception as e:
+    st.error(str(e))
 
 # -------------------------------
 # Tabs principali
