@@ -41,13 +41,16 @@ class Squadra:
 # -------------------------------
 # Stato iniziale
 # -------------------------------
+# Impostazioni bloccate da codice (non visibili in UI)
+SETTINGS = {
+    "num_squadre": 9,
+    "crediti": 700,
+    "quote_rosa": QUOTE_ROSA.copy(),
+    "no_doppioni": True,
+}
+
 if "settings" not in st.session_state:
-    st.session_state.settings = {
-        "num_squadre": 9,
-        "crediti": 700,
-        "quote_rosa": QUOTE_ROSA.copy(),
-        "no_doppioni": True,
-    }
+    st.session_state.settings = SETTINGS.copy()
 
 if "squadre" not in st.session_state:
     # Creazione predefinita: "Terzetto Scherzetto", "Squadra 2" ...
@@ -151,30 +154,10 @@ def reset_lega():
     st.session_state.storico_acquisti = []
 
 # -------------------------------
-# Sidebar – Impostazioni Lega
+# Sidebar – Utility
 # -------------------------------
 with st.sidebar:
-    st.title("⚙️ Impostazioni Lega")
-    crediti = st.number_input("Crediti per squadra", min_value=1, value=st.session_state.settings["crediti"], step=10)
-    num_squadre = st.number_input("Numero squadre", min_value=2, max_value=20, value=st.session_state.settings["num_squadre"], step=1)
-
-    cols = st.columns(4)
-    quote_inputs = {}
-    for i, r in enumerate(RUOLI):
-        with cols[i]:
-            quote_inputs[r] = st.number_input(f"{r}", min_value=0, value=st.session_state.settings["quote_rosa"][r], step=1)
-
-    no_doppioni = st.checkbox("Impedisci doppioni (consigliato)", value=st.session_state.settings["no_doppioni"])
-
-    apply = st.button("Applica impostazioni")
-    if apply:
-        st.session_state.settings["crediti"] = int(crediti)
-        st.session_state.settings["num_squadre"] = int(num_squadre)
-        st.session_state.settings["quote_rosa"] = {r: int(quote_inputs[r]) for r in RUOLI}
-        st.session_state.settings["no_doppioni"] = bool(no_doppioni)
-        st.success("Impostazioni aggiornate. Le nuove squadre verranno applicate al reset della lega.")
-
-    st.markdown("---")
+    st.title("⚙️ Utility Lega")
     if st.button("🔄 Reset lega (ricrea squadre e azzera acquisti)"):
         reset_lega()
         st.warning("Lega resettata.")
@@ -183,7 +166,7 @@ with st.sidebar:
 # Header
 # -------------------------------
 st.title("Fantacalcio – Gestore Lega")
-st.caption("Crea 9 squadre con 700 crediti e rosa 3P/8D/8C/6A. Rinomina le squadre, gestisci acquisti e rispetta i vincoli.")
+st.caption("Impostazioni fissate da codice: 9 squadre, 700 crediti, rosa 3P/8D/8C/6A, doppioni NON consentiti.")
 
 # -------------------------------
 # Tabs principali
@@ -296,4 +279,4 @@ with tab_esporta:
 
 # Footer
 st.markdown("---")
-st.caption("Suggerimento: attiva 'Impedisci doppioni' per una lega ad 1 cartellino per giocatore.")
+st.caption("Doppioni disattivati per design: un giocatore può appartenere a una sola squadra.")
