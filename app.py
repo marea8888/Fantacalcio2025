@@ -122,6 +122,24 @@ st.title("Fantacalcio – Gestore Lega")
 st.caption("Impostazioni fissate da codice: 9 squadre, 700 crediti, rosa 3P/8D/8C/6A, doppioni NON consentiti.")
 
 # -------------------------------
+# Asta corrente – selezione ruolo e lettera alfabetica
+# -------------------------------
+col_a, col_b = st.columns([1,1])
+with col_a:
+    st.subheader("Ruolo in asta")
+    ruolo_asta = st.radio("Seleziona il ruolo per cui si sta svolgendo l'asta", RUOLI, index=0, horizontal=True, key="ruolo_asta")
+with col_b:
+    st.subheader("Lettera estratta")
+    lettera_input = st.text_input("Inserisci la lettera alfabetica estratta (A–Z)", value=st.session_state.get("lettera_estratta", ""), max_chars=1)
+    # Normalizza a maiuscolo
+    lettera_norm = (lettera_input or "").upper()
+    st.session_state["lettera_estratta"] = lettera_norm
+    if lettera_norm:
+        st.info(f"Asta per ruolo **{ruolo_asta}** con lettera **{lettera_norm}**.")
+    else:
+        st.info(f"Asta per ruolo **{ruolo_asta}**. Inserisci una lettera per procedere con le regole che definirai.")
+
+# -------------------------------
 # Tabs principali
 # -------------------------------
 tab_riepilogo, tab_acquisti, tab_nomi = st.tabs(["📊 Riepilogo", "🛒 Acquisti", "✏️ Nomi"])
