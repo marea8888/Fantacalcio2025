@@ -282,7 +282,7 @@ st.caption("Impostazioni fissate da codice: 9 squadre, 700 crediti, rosa 3P/8D/8
 # ===============================
 # UI: TABS PRINCIPALI (in alto)
 # ===============================
-tab_asta, tab_riepilogo, tab_acquisti, tab_nomi = st.tabs(["⚽ Asta", "📊 Riepilogo", "🛒 Acquisti", "✏️ Nomi"])
+tab_asta, tab_riepilogo, tab_acquisti, tab_nomi = st.tabs(["🔨 Asta", "📊 Riepilogo", "🛒 Acquisti", "✏️ Nomi"])
 
 with tab_riepilogo:
     for team in st.session_state.squadre:
