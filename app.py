@@ -355,10 +355,12 @@ with st.sidebar:
             s = spent_map.get(r, 0)
             t = max(targ_map.get(r, 0), 1)  # evita div/0
             ratio = s / t
-            pct_txt = f"{int(round(100*ratio))}%"
-            st.markdown(f"**{label} ({count}/{quota}) — {s}/{t} ({pct_txt})**")
-            render_ratio_bar(ratio)
-            # Elenco giocatori con Slot
+            pct_int = int(round(100*ratio))
+            pct_color = ratio_color_hex(min(ratio,1.0))
+            badge_html = f" <span style='background:#DC2626;color:#fff;border-radius:12px;padding:2px 6px;margin-left:6px;'>+{s - t}</span>" if s > t else ""
+            header_html = f"<strong>{label} ({count}/{quota}) — {s}/{t} (<span style='color:{pct_color}'>{pct_int}%</span>)</strong>{badge_html}"
+            # Render box reparto con bordo condizionale e barra
+            # Elenco giocatori → HTML
             items = []
             for g in my_team.rosa[r]:
                 _slot = get_slot_for(g.nome, r)
@@ -366,11 +368,28 @@ with st.sidebar:
                     items.append(f"{g.nome} — Slot: {_slot} ({g.prezzo})")
                 else:
                     items.append(f"{g.nome} ({g.prezzo})")
-            if items:
-                for n in items:
-                    st.write("• ", n)
-            else:
-                st.write("_nessuno_")
+            items_html = "<ul style='margin:6px 0 0 18px;padding:0;'>" + "".join(f"<li>{n}</li>" for n in items) + "</ul>" if items else "<em>nessuno</em>"
+
+            # Barra di avanzamento colorata inline
+            bar_color = ratio_color_hex(min(ratio,1.0))
+            width_pct = int(round(min(ratio,1.0)*100))
+
+            # Bordo rosso leggero quando superi il target
+            border_col = "#FCA5A5" if s > t else "#E5E7EB"
+            bg_col = "#FFF6F6" if s > t else "transparent"
+
+            wrapper_html = f"""
+            <div style='border:1px solid {border_col}; padding:8px 10px; border-radius:10px; margin-bottom:10px; background:{bg_col};'>
+              {header_html}
+              <div style='margin-top:6px;background:#eee;width:100%;height:8px;border-radius:6px;overflow:hidden;'>
+                <div style='width:{width_pct}%;height:100%;background:{bar_color};'></div>
+              </div>
+              <div style='margin-top:6px;'>{items_html}</div>
+            </div>
+            """
+            st.markdown(wrapper_html, unsafe_allow_html=True)
+            
+            
         st.markdown("---")
         spesi = my_team.budget - crediti_rimasti(my_team)
         st.caption(f"Budget iniziale: {my_team.budget} • Spesi: {spesi}")
