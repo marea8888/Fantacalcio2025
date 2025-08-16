@@ -192,34 +192,17 @@ try:
 
             idx = st.session_state[key_idx]
             rec = df_view.iloc[idx]
-
-            # Mappa campi richiesti -> etichette
-            FIELD_MAP = {
-                "team": "Squadra",
-                "slot": "Slot",
-                "fasciafc": "Fascia",
-                "pfcrange": "Range Stimato",
-                "expectedfantamedia": "Fantamedia Stimata",
-            }
-            # Mappa delle colonne del dataframe in lower -> nome reale
-            cols_lower = {c.lower(): c for c in df_view.columns}
-
             with st.container(border=True):
                 st.subheader(rec[COL_NAME])
                 st.caption(f"Ruolo: {ruolo_asta}")
-
-                for key_lower, label in FIELD_MAP.items():
-                    col_real = cols_lower.get(key_lower)
-                    if not col_real:
+                for col in df_view.columns:
+                    if col == COL_NAME:
                         continue
-                    val = rec[col_real]
+                    val = rec[col]
                     if pd.isna(val) or str(val).strip() == "":
                         continue
-                    st.write(f"**{label}**: {val}")
-
-                # (Se servono altri campi extra non mappati, si possono aggiungere qui)
-
-            # Shortcut da tastiera non gestibili nativamente; pulsanti rimangono.
+                    st.write(f"**{col}**: {val}")
+                st.button("Seleziona", key=f"sel_{ruolo_asta}_{idx}")
 
 except Exception as e:
     st.error(str(e))
