@@ -282,7 +282,7 @@ st.caption("Impostazioni fissate da codice: 9 squadre, 700 crediti, rosa 3P/8D/8
 # ===============================
 # UI: TABS PRINCIPALI (in alto)
 # ===============================
-tab_riepilogo, tab_acquisti, tab_nomi = st.tabs(["📊 Riepilogo", "🛒 Acquisti", "✏️ Nomi"])
+tab_asta, tab_riepilogo, tab_acquisti, tab_nomi = st.tabs(["⚽ Asta", "📊 Riepilogo", "🛒 Acquisti", "✏️ Nomi"])
 
 with tab_riepilogo:
     for team in st.session_state.squadre:
@@ -327,120 +327,124 @@ with tab_nomi:
                 save_state()
 
 # ===============================
-# UI: ASTA – RUOLO & LETTERA
+# UI: ASTA – RUOLO & LETTERA (nel tab ⚽ Asta)
 # ===============================
-col_a, col_b = st.columns([1,1])
-with col_a:
-    st.subheader("Ruolo in asta")
-    ruolo_asta = st.radio(
-        "Seleziona il ruolo per cui si sta svolgendo l'asta",
-        RUOLI,
-        index=0,
-        horizontal=True,
-        key="ruolo_asta",
-    )
-with col_b:
-    st.subheader("Lettera estratta")
-    lettera_input = st.text_input(
-        "Inserisci la lettera alfabetica estratta (A–Z)",
-        value=st.session_state.get("lettera_estratta", ""),
-        max_chars=1,
-    )
-    st.session_state["lettera_estratta"] = (lettera_input or "").upper()
+with tab_asta:
+    col_a, col_b = st.columns([1,1])
+    with col_a:
+        st.subheader("Ruolo in asta")
+        ruolo_asta = st.radio(
+            "Seleziona il ruolo per cui si sta svolgendo l'asta",
+            RUOLI,
+            index=0,
+            horizontal=True,
+            key="ruolo_asta",
+        )
+    with col_b:
+        st.subheader("Lettera estratta")
+        lettera_input = st.text_input(
+            "Inserisci la lettera alfabetica estratta (A–Z)",
+            value=st.session_state.get("lettera_estratta", ""),
+            max_chars=1,
+        )
+        st.session_state["lettera_estratta"] = (lettera_input or "").upper()
 
-# ===============================
-# UI: CARD GIOCATORE – UNO ALLA VOLTA CON ASSEGNAZIONE DIRETTA
-# ===============================
-st.markdown("### 🎠 Calciatori (uno alla volta, in ordine dalla lettera estratta)")
-try:
-    df_raw = load_sheet_from_drive(ruolo_asta)
-    if df_raw.empty:
-        st.warning(f"Il foglio '{ruolo_asta}' è vuoto.")
-    else:
-        if NAME_COL not in df_raw.columns:
-            st.error(f"Nel foglio '{ruolo_asta}' non esiste la colonna '{NAME_COL}'.")
+    # ===============================
+    # UI: CARD GIOCATORE – UNO ALLA VOLTA CON ASSEGNAZIONE DIRETTA
+    # ===============================
+    st.markdown("### 🎠 Calciatori (uno alla volta, in ordine dalla lettera estratta)")
+    try:
+        df_raw = load_sheet_from_drive(ruolo_asta)
+        if df_raw.empty:
+            st.warning(f"Il foglio '{ruolo_asta}' è vuoto.")
         else:
-            df_view = rotate_from_letter(df_raw, NAME_COL, st.session_state.get("lettera_estratta", ""))
-            df_view[NAME_COL] = df_view[NAME_COL].astype(str).fillna("").str.strip()
-
-            # --- Filtro: rimuovi i calciatori già assegnati a qualsiasi squadra ---
-            def _norm(s):
-                return str(s).strip().upper()
-            taken = {_norm(n) for n in elenco_giocatori_global()}
-            if NAME_COL in df_view.columns:
-                df_view = df_view[~df_view[NAME_COL].map(_norm).isin(taken)].reset_index(drop=True)
-
-            key_idx = f"car_idx_{ruolo_asta}"
-            if key_idx not in st.session_state:
-                st.session_state[key_idx] = 0
-            total = len(df_view)
-
-            if total == 0:
-                st.info("Tutti i calciatori disponibili per questo ruolo risultano già assegnati.")
+            if NAME_COL not in df_raw.columns:
+                st.error(f"Nel foglio '{ruolo_asta}' non esiste la colonna '{NAME_COL}'.")
             else:
-                # Clamp index se va oltre la nuova lista filtrata
-                st.session_state[key_idx] = min(st.session_state[key_idx], total - 1)
+                df_view = rotate_from_letter(df_raw, NAME_COL, st.session_state.get("lettera_estratta", ""))
+                df_view[NAME_COL] = df_view[NAME_COL].astype(str).fillna("").str.strip()
 
-                # NAV
-                c_nav1, c_nav2, c_nav3 = st.columns([1,3,1])
-                with c_nav1:
-                    if st.button("◀︎", use_container_width=True, key=f"prev_{ruolo_asta}"):
-                        st.session_state[key_idx] = max(0, st.session_state[key_idx] - 1)
-                with c_nav2:
-                    st.write(f"Mostrato {st.session_state[key_idx]+1} di {total}")
-                with c_nav3:
-                    if st.button("▶︎", use_container_width=True, key=f"next_{ruolo_asta}"):
-                        st.session_state[key_idx] = min(total-1, st.session_state[key_idx] + 1)
+                # --- Filtro: rimuovi i calciatori già assegnati a qualsiasi squadra ---
+                def _norm(s):
+                    return str(s).strip().upper()
+                taken = {_norm(n) for n in elenco_giocatori_global()}
+                if NAME_COL in df_view.columns:
+                    df_view = df_view[~df_view[NAME_COL].map(_norm).isin(taken)].reset_index(drop=True)
 
-                idx = st.session_state[key_idx]
-                rec = df_view.iloc[idx]
+                key_idx = f"car_idx_{ruolo_asta}"
+                if key_idx not in st.session_state:
+                    st.session_state[key_idx] = 0
+                total = len(df_view)
 
-                # CARD
-                with st.container(border=True):
-                    st.subheader(rec[NAME_COL])
-                    st.caption(f"Ruolo: {ruolo_asta}")
+                if total == 0:
+                    st.info("Tutti i calciatori disponibili per questo ruolo risultano già assegnati.")
+                else:
+                    # Clamp index se va oltre la nuova lista filtrata
+                    st.session_state[key_idx] = min(st.session_state[key_idx], total - 1)
 
-                    # Mostra SOLO i campi richiesti (case-insensitive)
-                    cols_lower = {c.lower(): c for c in df_view.columns}
-                    for key_lower, label in FIELD_LABELS.items():
-                        real_col = cols_lower.get(key_lower)
-                        if not real_col:
-                            continue
-                        val = rec[real_col]
-                        if pd.isna(val) or str(val).strip() == "":
-                            continue
-                        st.write(f"**{label}**: {val}")
+                    # NAV
+                    c_nav1, c_nav2, c_nav3 = st.columns([1,3,1])
+                    with c_nav1:
+                        if st.button("◀︎", use_container_width=True, key=f"prev_{ruolo_asta}"):
+                            st.session_state[key_idx] = max(0, st.session_state[key_idx] - 1)
+                    with c_nav2:
+                        st.write(f"Mostrato {st.session_state[key_idx]+1} di {total}")
+                    with c_nav3:
+                        if st.button("▶︎", use_container_width=True, key=f"next_{ruolo_asta}"):
+                            st.session_state[key_idx] = min(total-1, st.session_state[key_idx] + 1)
 
-                    st.markdown("---")
-                    st.subheader("📝 Assegna a squadra")
-                    team_options = list(range(len(st.session_state.squadre)))
-                    sel_team_idx = st.selectbox(
-                        "Scegli squadra",
-                        team_options,
-                        index=min(st.session_state.my_team_idx, len(team_options)-1) if team_options else 0,
-                        format_func=lambda i: st.session_state.squadre[i].nome if team_options else "",
-                        key=f"sel_team_{ruolo_asta}_{idx}"
-                    )
-                    prezzo_sel = st.number_input("Prezzo di aggiudicazione", min_value=0, step=1, key=f"prezzo_{ruolo_asta}_{idx}")
-                    if st.button("Aggiungi alla squadra", key=f"add_{ruolo_asta}_{idx}"):
-                        if st.session_state.squadre:
-                            team_sel = st.session_state.squadre[sel_team_idx]
-                            ok = aggiungi_giocatore(team_sel, rec[NAME_COL], ruolo_asta, int(prezzo_sel))
-                            if ok:
-                                st.success(f"{rec[NAME_COL]} aggiunto a {team_sel.nome} per {int(prezzo_sel)}.")
-                                # Avanza e ricarica per rimuovere subito il giocatore dalla lista
-                                st.session_state[key_idx] = min(total-1, st.session_state[key_idx]+1)
-                                try:
-                                    st.rerun()
-                                except Exception:
-                                    st.experimental_rerun()
-                            else:
-                                st.error("Impossibile aggiungere il giocatore: controlla crediti/quote/doppioni.")
-except Exception as e:
-    st.error(str(e))
+                    idx = st.session_state[key_idx]
+                    rec = df_view.iloc[idx]
+
+                    # CARD
+                    with st.container(border=True):
+                        st.subheader(rec[NAME_COL])
+                        st.caption(f"Ruolo: {ruolo_asta}")
+
+                        # Mostra SOLO i campi richiesti (case-insensitive)
+                        cols_lower = {c.lower(): c for c in df_view.columns}
+                        for key_lower, label in FIELD_LABELS.items():
+                            real_col = cols_lower.get(key_lower)
+                            if not real_col:
+                                continue
+                            val = rec[real_col]
+                            if pd.isna(val) or str(val).strip() == "":
+                                continue
+                            st.write(f"**{label}**: {val}")
+
+                        st.markdown("---")
+                        st.subheader("📝 Assegna a squadra")
+                        team_options = list(range(len(st.session_state.squadre)))
+                        sel_team_idx = st.selectbox(
+                            "Scegli squadra",
+                            team_options,
+                            index=min(st.session_state.my_team_idx, len(team_options)-1) if team_options else 0,
+                            format_func=lambda i: st.session_state.squadre[i].nome if team_options else "",
+                            key=f"sel_team_{ruolo_asta}_{idx}"
+                        )
+                        prezzo_sel = st.number_input("Prezzo di aggiudicazione", min_value=0, step=1, key=f"prezzo_{ruolo_asta}_{idx}")
+                        if st.button("Aggiungi alla squadra", key=f"add_{ruolo_asta}_{idx}"):
+                            if st.session_state.squadre:
+                                team_sel = st.session_state.squadre[sel_team_idx]
+                                ok = aggiungi_giocatore(team_sel, rec[NAME_COL], ruolo_asta, int(prezzo_sel))
+                                if ok:
+                                    st.success(f"{rec[NAME_COL]} aggiunto a {team_sel.nome} per {int(prezzo_sel)}.")
+                                    # Avanza e ricarica per rimuovere subito il giocatore dalla lista
+                                    st.session_state[key_idx] = min(total-1, st.session_state[key_idx]+1)
+                                    try:
+                                        st.rerun()
+                                    except Exception:
+                                        st.experimental_rerun()
+                                else:
+                                    st.error("Impossibile aggiungere il giocatore: controlla crediti/quote/doppioni.")
+    except Exception as e:
+        st.error(str(e))
 
 # ===============================
 # FOOTER
+# ===============================
+st.markdown("---")
+st.caption("Doppioni disattivati per design: un giocatore può appartenere a una sola squadra.")
 # ===============================
 st.markdown("---")
 st.caption("Doppioni disattivati per design: un giocatore può appartenere a una sola squadra.")
