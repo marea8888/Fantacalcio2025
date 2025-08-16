@@ -159,9 +159,9 @@ def rotate_from_letter(df: pd.DataFrame, col_name: str, letter: str) -> pd.DataF
     return rotated
 
 # -------------------------------
-# Carosello calciatori (scroll sx→dx)
+# Visualizzazione singolo calciatore con navigazione
 # -------------------------------
-st.markdown("### 🎠 Calciatori (in ordine dalla lettera estratta)")
+st.markdown("### 🎠 Calciatori (uno alla volta, in ordine dalla lettera estratta)")
 try:
     df_raw = load_sheet_from_drive(FILE_ID, ruolo_asta)
     if df_raw.empty:
@@ -172,55 +172,40 @@ try:
             st.error(f"Nel foglio '{ruolo_asta}' non esiste la colonna '{COL_NAME}'.")
         else:
             df_view = rotate_from_letter(df_raw, COL_NAME, st.session_state.get("lettera_estratta", ""))
-            # Pulisci NA e normalizza nomi
             df_view[COL_NAME] = df_view[COL_NAME].astype(str).fillna("").str.strip()
-            # Stato carosello
+
             key_idx = f"car_idx_{ruolo_asta}"
             if key_idx not in st.session_state:
                 st.session_state[key_idx] = 0
-            cards_per_row = 5
             total = len(df_view)
 
-            # Controlli carosello
+            # Controlli navigazione
             c_nav1, c_nav2, c_nav3 = st.columns([1,3,1])
             with c_nav1:
                 if st.button("◀︎", use_container_width=True, key=f"prev_{ruolo_asta}"):
-                    st.session_state[key_idx] = max(0, st.session_state[key_idx] - cards_per_row)
+                    st.session_state[key_idx] = max(0, st.session_state[key_idx] - 1)
             with c_nav2:
-                st.write(f"Mostrati {min(st.session_state[key_idx]+1, total)}–{min(st.session_state[key_idx]+cards_per_row, total)} di {total}")
+                st.write(f"Mostrato {st.session_state[key_idx]+1} di {total}")
             with c_nav3:
                 if st.button("▶︎", use_container_width=True, key=f"next_{ruolo_asta}"):
-                    st.session_state[key_idx] = min(total-1, st.session_state[key_idx] + cards_per_row)
+                    st.session_state[key_idx] = min(total-1, st.session_state[key_idx] + 1)
 
-            start = st.session_state[key_idx]
-            end = min(total, start + cards_per_row)
-            row = st.columns(cards_per_row)
-
-            display_cols = [c for c in df_view.columns if c != COL_NAME]
-            # Mostra una riga di card scorrevoli
-            for i, idx in enumerate(range(start, end)):
-                with row[i]:
-                    rec = df_view.iloc[idx]
-                    with st.container(border=True):
-                        st.subheader(rec[COL_NAME])
-                        st.caption(f"Ruolo: {ruolo_asta}")
-                        # Mostra prime 6 info utili
-                        shown = 0
-                        for col in display_cols:
-                            val = rec[col]
-                            if pd.isna(val) or str(val).strip() == "":
-                                continue
-                            st.write(f"**{col}**: {val}")
-                            shown += 1
-                            if shown >= 6:
-                                break
-                        # Pulsante (placeholder per azioni future)
-                        st.button("Seleziona", key=f"sel_{ruolo_asta}_{idx}")
-
-            # Slider rapido per saltare
-            st.slider("Vai alla posizione", 0, max(0, total-1), value=start, key=f"jump_{ruolo_asta}")
-            if st.session_state[f"jump_{ruolo_asta}"] != start:
-                st.session_state[key_idx] = st.session_state[f"jump_{ruolo_asta}"]
+            idx = st.session_state[key_idx]
+            rec = df_view.iloc[idx]
+            with st.container(border=True):
+                st.subheader(rec[COL_NAME])
+                st.caption(f"Ruolo: {ruolo_asta}")
+                display_cols = [c for c in df_view.columns if c != COL_NAME]
+                shown = 0
+                for col in display_cols:
+                    val = rec[col]
+                    if pd.isna(val) or str(val).strip() == "":
+                        continue
+                    st.write(f"**{col}**: {val}")
+                    shown += 1
+                    if shown >= 6:
+                        break
+                st.button("Seleziona", key=f"sel_{ruolo_asta}_{idx}")
 
 except Exception as e:
     st.error(str(e))
