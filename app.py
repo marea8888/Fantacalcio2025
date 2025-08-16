@@ -5,23 +5,45 @@ from typing import List, Dict
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Fantacalcio – Gestore Lega", page_icon="⚽", layout="wide", initial_sidebar_state="expanded")
+# ===============================
+# CONFIG APP
+# ===============================
+st.set_page_config(
+    page_title="Fantacalcio – Gestore Lega",
+    page_icon="⚽",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-# -------------------------------
-# Modello dati / Settings fissati
-# -------------------------------
+# ===============================
+# COSTANTI & SETTINGS (bloccati da codice)
+# ===============================
 RUOLI = ["P", "D", "C", "A"]
 QUOTE_ROSA = {"P": 3, "D": 8, "C": 8, "A": 6}
 SETTINGS = {
     "num_squadre": 9,
     "crediti": 700,
     "quote_rosa": QUOTE_ROSA.copy(),
-    "no_doppioni": True,
+    "no_doppioni": True,  # un giocatore può appartenere ad una sola squadra
 }
 
-# -------------------------------
-# Dataclass
-# -------------------------------
+# Google Drive: file Excel con i fogli P/D/C/A e colonna "name"
+FILE_ID = "1fbDUNKOmuxsJ_BAd7Sgm-V4tO5UkXXLE"
+DRIVE_XLSX_URL = f"https://drive.google.com/uc?export=download&id={FILE_ID}"
+
+# Campi da visualizzare nella card giocatore (case-insensitive)
+FIELD_LABELS = {
+    "team": "Squadra",
+    "slot": "Slot",
+    "fasciafc": "Fascia",
+    "pfcrange": "Range Stimato",
+    "expectedfantamedia": "Fantamedia Stimata",
+}
+NAME_COL = "name"  # colonna con il nome del calciatore
+
+# ===============================
+# DATA MODEL
+# ===============================
 @dataclass
 class Giocatore:
     nome: str
@@ -43,28 +65,29 @@ class Squadra:
 
     @staticmethod
     def from_dict(d: dict) -> "Squadra":
-        s = Squadra(d["nome"], d["budget"])
-        s.rosa = {r: [Giocatore(**g) for g in d["rosa"].get(r, [])] for r in RUOLI}
+        s = Squadra(d["nome"], d["budget"]) 
+        s.rosa = {r: [Giocatore(**g) for g in d.get("rosa", {}).get(r, [])] for r in RUOLI}
         return s
 
-# -------------------------------
-# Stato iniziale
-# -------------------------------
+# ===============================
+# STATO INIZIALE
+# ===============================
 if "settings" not in st.session_state:
     st.session_state.settings = SETTINGS.copy()
 
 if "squadre" not in st.session_state:
-    def _init_default_squadre():
-        s = []
+    def _init_default_squadre() -> List[Squadra]:
+        arr = []
         for i in range(st.session_state.settings["num_squadre"]):
             nome = "Terzetto Scherzetto" if i == 0 else f"Squadra {i+1}"
-            s.append(Squadra(nome, st.session_state.settings["crediti"]))
-        return s
-    st.session_state.squadre: List[Squadra] = _init_default_squadre()
+            arr.append(Squadra(nome, st.session_state.settings["crediti"]))
+        return arr
+    st.session_state.squadre = _init_default_squadre()
 
 if "storico_acquisti" not in st.session_state:
     st.session_state.storico_acquisti: List[dict] = []
 
+# squadra seguita (robusto ai rinomini: salviamo l'indice)
 if "my_team_idx" not in st.session_state:
     default_idx = 0
     for i, t in enumerate(st.session_state.squadre):
@@ -73,21 +96,26 @@ if "my_team_idx" not in st.session_state:
             break
     st.session_state.my_team_idx = default_idx
 
-# -------------------------------
-# Helper funzioni gestione lega
-# -------------------------------
+# ===============================
+# FUNZIONI LEGA
+# ===============================
+
 def quote_rimaste(team: Squadra) -> Dict[str, int]:
     return {r: st.session_state.settings["quote_rosa"][r] - len(team.rosa[r]) for r in RUOLI}
 
+
 def rosa_completa(team: Squadra) -> bool:
     return all(len(team.rosa[r]) >= st.session_state.settings["quote_rosa"][r] for r in RUOLI)
+
 
 def crediti_rimasti(team: Squadra) -> int:
     spesi = sum(g.prezzo for r in RUOLI for g in team.rosa[r])
     return team.budget - spesi
 
+
 def elenco_giocatori_global() -> List[str]:
     return [g.nome for team in st.session_state.squadre for r in RUOLI for g in team.rosa[r]]
+
 
 def aggiungi_giocatore(team: Squadra, nome: str, ruolo: str, prezzo: int) -> bool:
     if not nome.strip() or ruolo not in RUOLI or prezzo < 0:
@@ -107,6 +135,7 @@ def aggiungi_giocatore(team: Squadra, nome: str, ruolo: str, prezzo: int) -> boo
     })
     return True
 
+
 def rimuovi_giocatore(team: Squadra, ruolo: str, giocatore_nome: str) -> bool:
     elenco = team.rosa[ruolo]
     for i, g in enumerate(elenco):
@@ -115,21 +144,49 @@ def rimuovi_giocatore(team: Squadra, ruolo: str, giocatore_nome: str) -> bool:
             return True
     return False
 
-# -------------------------------
-# Sidebar – Riepilogo squadra seguita
-# -------------------------------
+# ===============================
+# FUNZIONI DATI GDRIVE
+# ===============================
+@st.cache_data(show_spinner=False)
+def load_sheet_from_drive(sheet_name: str) -> pd.DataFrame:
+    try:
+        df = pd.read_excel(DRIVE_XLSX_URL, sheet_name=sheet_name)
+        return df
+    except ImportError:
+        raise RuntimeError("Per leggere file Excel è necessario installare 'openpyxl' (pip install openpyxl)")
+
+@st.cache_data(show_spinner=False)
+def rotate_from_letter(df: pd.DataFrame, col_name: str, letter: str) -> pd.DataFrame:
+    if col_name not in df.columns:
+        return df
+    base = df.sort_values(col_name, key=lambda s: s.astype(str).str.upper()).reset_index(drop=True)
+    if not letter or len(letter) != 1 or not letter.isalpha():
+        return base
+    initials = base[col_name].astype(str).str.strip().str.upper().str[0]
+    letter = letter.upper()
+    alphabet = [chr(c) for c in range(ord('A'), ord('Z')+1)]
+    order = alphabet[alphabet.index(letter):] + alphabet[:alphabet.index(letter)]
+    frames = [base[initials == ch] for ch in order]
+    rotated = pd.concat(frames, ignore_index=True)
+    rotated = pd.concat([rotated, base[~initials.isin(alphabet)]], ignore_index=True)
+    return rotated
+
+# ===============================
+# UI: SIDEBAR – RIEPILOGO + ASSEGNAZIONE RAPIDA
+# ===============================
 with st.sidebar:
     st.title("📋 Riepilogo Squadra")
+
     st.session_state.my_team_idx = min(st.session_state.my_team_idx, len(st.session_state.squadre)-1)
-    options_idx = list(range(len(st.session_state.squadre)))
-    my_idx = st.selectbox(
+    idx_options = list(range(len(st.session_state.squadre)))
+    sel_idx = st.selectbox(
         "Segui squadra",
-        options_idx,
+        idx_options,
         index=st.session_state.my_team_idx,
         format_func=lambda i: st.session_state.squadre[i].nome,
     )
-    st.session_state.my_team_idx = my_idx
-    my_team = st.session_state.squadre[my_idx] if st.session_state.squadre else None
+    st.session_state.my_team_idx = sel_idx
+    my_team = st.session_state.squadre[sel_idx] if st.session_state.squadre else None
 
     if my_team:
         st.metric("Crediti rimasti", crediti_rimasti(my_team))
@@ -151,92 +208,74 @@ with st.sidebar:
         spesi = my_team.budget - crediti_rimasti(my_team)
         st.caption(f"Budget iniziale: {my_team.budget} • Spesi: {spesi}")
 
-        # Box per aggiungere il giocatore selezionato
-        if "selected_player" in st.session_state:
-            sel = st.session_state.selected_player
-            st.subheader("⚡ Acquisto rapido")
-            st.write(f"Giocatore selezionato: **{sel['nome']}** ({sel['ruolo']})")
-            prezzo_sel = st.number_input("Prezzo offerto", min_value=0, step=1, key="prezzo_sel")
-            if st.button("Conferma acquisto"):
-                if aggiungi_giocatore(my_team, sel['nome'], sel['ruolo'], int(prezzo_sel)):
-                    st.success(f"{sel['nome']} aggiunto a {my_team.nome} per {prezzo_sel} crediti.")
-                    del st.session_state["selected_player"]
+        st.markdown("---")
+        st.subheader("📝 Assegna giocatore selezionato")
+        pending = st.session_state.get("pending_player")
+        if pending:
+            st.write(f"Giocatore: **{pending['nome']}** • Ruolo: **{pending['ruolo']}**")
+            prezzo_sel = st.number_input("Prezzo di aggiudicazione", min_value=0, step=1, key="prezzo_sel")
+            if st.button("Aggiungi alla squadra seguita", key="add_pending"):
+                ok = aggiungi_giocatore(my_team, pending['nome'], pending['ruolo'], int(prezzo_sel))
+                if ok:
+                    st.success(f"{pending['nome']} aggiunto a {my_team.nome} per {int(prezzo_sel)}.")
+                    key_idx = f"car_idx_{st.session_state.get('ruolo_asta','P')}"
+                    if key_idx in st.session_state:
+                        st.session_state[key_idx] = min(st.session_state[key_idx] + 1, 10**9)
+                    st.session_state.pop("pending_player", None)
                 else:
-                    st.error("Impossibile aggiungere il giocatore.")
+                    st.error("Impossibile aggiungere il giocatore: controlla crediti/quote/doppioni.")
+        else:
+            st.caption("Nessun giocatore selezionato: usa il pulsante 'Seleziona' nella card principale.")
 
-# -------------------------------
-# Header
-# -------------------------------
+# ===============================
+# UI: HEADER
+# ===============================
 st.title("Fantacalcio – Gestore Lega")
 st.caption("Impostazioni fissate da codice: 9 squadre, 700 crediti, rosa 3P/8D/8C/6A, doppioni NON consentiti.")
 
-# -------------------------------
-# Asta corrente – ruolo & lettera
-# -------------------------------
+# ===============================
+# UI: ASTA – RUOLO & LETTERA
+# ===============================
 col_a, col_b = st.columns([1,1])
 with col_a:
     st.subheader("Ruolo in asta")
-    ruolo_asta = st.radio("Seleziona il ruolo per cui si sta svolgendo l'asta", RUOLI, index=0, horizontal=True, key="ruolo_asta")
+    ruolo_asta = st.radio(
+        "Seleziona il ruolo per cui si sta svolgendo l'asta",
+        RUOLI,
+        index=0,
+        horizontal=True,
+        key="ruolo_asta",
+    )
 with col_b:
     st.subheader("Lettera estratta")
-    lettera_input = st.text_input("Inserisci la lettera alfabetica estratta (A–Z)", value=st.session_state.get("lettera_estratta", ""), max_chars=1)
-    lettera_norm = (lettera_input or "").upper()
-    st.session_state["lettera_estratta"] = lettera_norm
+    lettera_input = st.text_input(
+        "Inserisci la lettera alfabetica estratta (A–Z)",
+        value=st.session_state.get("lettera_estratta", ""),
+        max_chars=1,
+    )
+    st.session_state["lettera_estratta"] = (lettera_input or "").upper()
 
-# -------------------------------
-# Lettura Google Drive & ordinamento
-# -------------------------------
-FILE_ID = "1fbDUNKOmuxsJ_BAd7Sgm-V4tO5UkXXLE"
-
-@st.cache_data(show_spinner=False)
-def load_sheet_from_drive(file_id: str, sheet_name: str) -> pd.DataFrame:
-    url = f"https://drive.google.com/uc?export=download&id={file_id}"
-    try:
-        df = pd.read_excel(url, sheet_name=sheet_name)
-        return df
-    except ImportError:
-        raise RuntimeError("Per leggere file Excel è necessario installare 'openpyxl' (pip install openpyxl)")
-
-@st.cache_data(show_spinner=False)
-def rotate_from_letter(df: pd.DataFrame, col_name: str, letter: str) -> pd.DataFrame:
-    if col_name not in df.columns:
-        return df
-    base = df.sort_values(col_name, key=lambda s: s.astype(str).str.upper()).reset_index(drop=True)
-    if not letter or len(letter) != 1 or not letter.isalpha():
-        return base
-    initials = base[col_name].astype(str).str.strip().str.upper().str[0]
-    letter = letter.upper()
-    alphabet = [chr(c) for c in range(ord('A'), ord('Z')+1)]
-    order = alphabet[alphabet.index(letter):] + alphabet[:alphabet.index(letter)]
-    frames = []
-    for ch in order:
-        frames.append(base[initials == ch])
-    rotated = pd.concat(frames, ignore_index=True)
-    rotated = pd.concat([rotated, base[~initials.isin(alphabet)]], ignore_index=True)
-    return rotated
-
-# -------------------------------
-# Visualizzazione singolo calciatore con navigazione
-# -------------------------------
+# ===============================
+# UI: CARD GIOCATORE – UNO ALLA VOLTA
+# ===============================
 st.markdown("### 🎠 Calciatori (uno alla volta, in ordine dalla lettera estratta)")
 try:
-    df_raw = load_sheet_from_drive(FILE_ID, ruolo_asta)
+    df_raw = load_sheet_from_drive(ruolo_asta)
     if df_raw.empty:
         st.warning(f"Il foglio '{ruolo_asta}' è vuoto.")
     else:
-        COL_NAME = "name"
-        if COL_NAME not in df_raw.columns:
-            st.error(f"Nel foglio '{ruolo_asta}' non esiste la colonna '{COL_NAME}'.")
+        if NAME_COL not in df_raw.columns:
+            st.error(f"Nel foglio '{ruolo_asta}' non esiste la colonna '{NAME_COL}'.")
         else:
-            df_view = rotate_from_letter(df_raw, COL_NAME, st.session_state.get("lettera_estratta", ""))
-            df_view[COL_NAME] = df_view[COL_NAME].astype(str).fillna("").str.strip()
+            df_view = rotate_from_letter(df_raw, NAME_COL, st.session_state.get("lettera_estratta", ""))
+            df_view[NAME_COL] = df_view[NAME_COL].astype(str).fillna("").str.strip()
 
             key_idx = f"car_idx_{ruolo_asta}"
             if key_idx not in st.session_state:
                 st.session_state[key_idx] = 0
             total = len(df_view)
 
-            # Controlli navigazione
+            # NAV
             c_nav1, c_nav2, c_nav3 = st.columns([1,3,1])
             with c_nav1:
                 if st.button("◀︎", use_container_width=True, key=f"prev_{ruolo_asta}"):
@@ -249,25 +288,33 @@ try:
 
             idx = st.session_state[key_idx]
             rec = df_view.iloc[idx]
+
+            # CARD
             with st.container(border=True):
-                st.subheader(rec[COL_NAME])
+                st.subheader(rec[NAME_COL])
                 st.caption(f"Ruolo: {ruolo_asta}")
-                for col in df_view.columns:
-                    if col == COL_NAME:
+
+                # Mostra SOLO i campi richiesti
+                cols_lower = {c.lower(): c for c in df_view.columns}
+                for key_lower, label in FIELD_LABELS.items():
+                    real_col = cols_lower.get(key_lower)
+                    if not real_col:
                         continue
-                    val = rec[col]
+                    val = rec[real_col]
                     if pd.isna(val) or str(val).strip() == "":
                         continue
-                    st.write(f"**{col}**: {val}")
+                    st.write(f"**{label}**: {val}")
+
                 if st.button("Seleziona", key=f"sel_{ruolo_asta}_{idx}"):
-                    st.session_state["selected_player"] = {"nome": rec[COL_NAME], "ruolo": ruolo_asta}
+                    st.session_state["pending_player"] = {"nome": rec[NAME_COL], "ruolo": ruolo_asta}
+                    st.success(f"Selezionato {rec[NAME_COL]} → apri la sidebar per assegnarlo.")
 
 except Exception as e:
     st.error(str(e))
 
-# -------------------------------
-# Tabs principali (invariati)
-# -------------------------------
+# ===============================
+# UI: TABS PRINCIPALI
+# ===============================
 tab_riepilogo, tab_acquisti, tab_nomi = st.tabs(["📊 Riepilogo", "🛒 Acquisti", "✏️ Nomi"])
 
 with tab_riepilogo:
