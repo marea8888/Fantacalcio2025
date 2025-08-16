@@ -397,9 +397,7 @@ with st.sidebar:
 # ===============================
 # UI: HEADER
 # ===============================
-st.title("Fantacalcio – Gestore Lega")
-st.caption(f"Impostazioni fissate da codice: {st.session_state.settings['num_squadre']} squadre, {st.session_state.settings['crediti']} crediti, rosa 3P/8D/8C/6A, doppioni NON consentiti.")
-
+st.title("FantaGioia 2025/2026")
 # ===============================
 # UI: TABS PRINCIPALI (in alto)
 # ===============================
