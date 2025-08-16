@@ -195,16 +195,13 @@ try:
             with st.container(border=True):
                 st.subheader(rec[COL_NAME])
                 st.caption(f"Ruolo: {ruolo_asta}")
-                display_cols = [c for c in df_view.columns if c != COL_NAME]
-                shown = 0
-                for col in display_cols:
+                for col in df_view.columns:
+                    if col == COL_NAME:
+                        continue
                     val = rec[col]
                     if pd.isna(val) or str(val).strip() == "":
                         continue
                     st.write(f"**{col}**: {val}")
-                    shown += 1
-                    if shown >= 6:
-                        break
                 st.button("Seleziona", key=f"sel_{ruolo_asta}_{idx}")
 
 except Exception as e:
