@@ -22,7 +22,7 @@ st.set_page_config(
 RUOLI = ["P", "D", "C", "A"]
 QUOTE_ROSA = {"P": 3, "D": 8, "C": 8, "A": 6}
 SETTINGS = {
-    "num_squadre": 9,
+    "num_squadre": 10,
     "crediti": 700,
     "quote_rosa": QUOTE_ROSA.copy(),
     "no_doppioni": True,  # un giocatore può appartenere ad una sola squadra
@@ -125,6 +125,18 @@ if "_boot" not in st.session_state:
                 break
         st.session_state.my_team_idx = default_idx
         save_state()
+    # Allinea il numero di squadre alla nuova regola (10)
+    desired = 10
+    if st.session_state.settings.get("num_squadre") != desired:
+        st.session_state.settings["num_squadre"] = desired
+    # Aggiungi squadre mancanti se servono (non rimuove se >10)
+    if len(st.session_state.squadre) < desired:
+        start_i = len(st.session_state.squadre)
+        for i in range(start_i, desired):
+            nome = "Terzetto Scherzetto" if i == 0 else f"Squadra {i+1}"
+            st.session_state.squadre.append(Squadra(nome, st.session_state.settings["crediti"]))
+        save_state()
+
     st.session_state._boot = True
 
 # ===============================
@@ -277,7 +289,7 @@ with st.sidebar:
 # UI: HEADER
 # ===============================
 st.title("Fantacalcio – Gestore Lega")
-st.caption("Impostazioni fissate da codice: 9 squadre, 700 crediti, rosa 3P/8D/8C/6A, doppioni NON consentiti.")
+st.caption("Impostazioni fissate da codice: 10 squadre, 700 crediti, rosa 3P/8D/8C/6A, doppioni NON consentiti.")
 
 # ===============================
 # UI: TABS PRINCIPALI (in alto)
@@ -327,7 +339,7 @@ with tab_nomi:
                 save_state()
 
 # ===============================
-# UI: ASTA – RUOLO & LETTERA (nel tab ⚽ Asta)
+# UI: ASTA – RUOLO & LETTERA (nel tab 🔨 Asta)
 # ===============================
 with tab_asta:
     col_a, col_b = st.columns([1,1])
