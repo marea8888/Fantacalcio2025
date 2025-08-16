@@ -26,6 +26,7 @@ SETTINGS = {
     "crediti": 700,
     "quote_rosa": QUOTE_ROSA.copy(),
     "no_doppioni": True,  # un giocatore può appartenere ad una sola squadra
+    "spending_targets": {"P": 0.10, "D": 0.20, "C": 0.30, "A": 0.40},
 }
 
 # Google Drive: file Excel con i fogli P/D/C/A e colonna "name"
@@ -41,6 +42,7 @@ FIELD_LABELS = {
     "expectedfantamedia": "Fantamedia Stimata",
 }
 NAME_COL = "name"  # colonna con il nome del calciatore
+ROLE_LABELS = {"P": "Porta", "D": "Difesa", "C": "Centrocampo", "A": "Attacco"}
 
 # ===============================
 # DATA MODEL
@@ -82,6 +84,7 @@ def save_state():
             "squadre": [s.to_dict() for s in st.session_state.get("squadre", [])],
             "storico": st.session_state.get("storico_acquisti", []),
             "my_team_idx": st.session_state.get("my_team_idx", 0),
+            "user_team_idx": st.session_state.get("user_team_idx", st.session_state.get("my_team_idx", 0)),
         }
         PERSIST_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
@@ -92,9 +95,11 @@ def load_state():
         if PERSIST_PATH.exists():
             data = json.loads(PERSIST_PATH.read_text(encoding="utf-8"))
             st.session_state.settings = data.get("settings", SETTINGS.copy())
+            st.session_state.settings.setdefault("spending_targets", {"P": 0.10, "D": 0.20, "C": 0.30, "A": 0.40})
             st.session_state.squadre = [Squadra.from_dict(d) for d in data.get("squadre", [])]
             st.session_state.storico_acquisti = data.get("storico", [])
             st.session_state.my_team_idx = data.get("my_team_idx", 0)
+            st.session_state.user_team_idx = data.get("user_team_idx", st.session_state.my_team_idx)
             return True
     except Exception:
         pass
@@ -124,6 +129,7 @@ if "_boot" not in st.session_state:
                 default_idx = i
                 break
         st.session_state.my_team_idx = default_idx
+        st.session_state.user_team_idx = default_idx
         save_state()
     # Allinea il numero di squadre alla nuova regola (10)
     desired = 10
@@ -158,6 +164,15 @@ def crediti_rimasti(team: Squadra) -> int:
 
 def elenco_giocatori_global() -> List[str]:
     return [g.nome for team in st.session_state.squadre for r in RUOLI for g in team.rosa[r]]
+
+
+def spesa_per_ruolo(team: Squadra) -> Dict[str, int]:
+    return {r: sum(g.prezzo for g in team.rosa[r]) for r in RUOLI}
+
+
+def target_per_ruolo(team: Squadra) -> Dict[str, int]:
+    perc = st.session_state.settings.get("spending_targets", {"P": 0.10, "D": 0.20, "C": 0.30, "A": 0.40})
+    return {r: int(round(team.budget * perc.get(r, 0))) for r in RUOLI}
 
 
 def aggiungi_giocatore(team: Squadra, nome: str, ruolo: str, prezzo: int) -> bool:
@@ -300,6 +315,17 @@ with st.sidebar:
 
     if my_team:
         st.metric("Crediti rimasti", crediti_rimasti(my_team))
+        # Monitor budget per reparto (solo per la mia squadra)
+        if sel_idx == st.session_state.get("user_team_idx", -1):
+            st.markdown("**🎯 Budget per reparto (target personale)**")
+            spent = spesa_per_ruolo(my_team)
+            targ = target_per_ruolo(my_team)
+            for r in RUOLI:
+                s = spent.get(r, 0)
+                t = max(targ.get(r, 0), 1)
+                pct = min(s / t, 1.0)
+                st.caption(f"{ROLE_LABELS[r]}: {s}/{t} ({int(round(100*s/t))}%)")
+                st.progress(pct)
         # Lista per ruolo con contatore (acquisti/slot)
         st.markdown("---")
         for r, label in [("P","Portieri"),("D","Difensori"),("C","Centrocampisti"),("A","Attaccanti")]:
@@ -472,6 +498,21 @@ with tab_asta:
                             key=f"sel_team_{ruolo_asta}_{idx}"
                         )
                         prezzo_sel = st.number_input("Prezzo di aggiudicazione", min_value=0, step=1, key=f"prezzo_{ruolo_asta}_{idx}")
+
+                        # Monitor spesa reparto per la mia squadra (preview post-acquisto)
+                        if sel_team_idx == st.session_state.get("user_team_idx", -1):
+                            team_sel = st.session_state.squadre[sel_team_idx]
+                            curr = spesa_per_ruolo(team_sel).get(ruolo_asta, 0)
+                            targ = target_per_ruolo(team_sel).get(ruolo_asta, 0)
+                            projected = curr + int(prezzo_sel)
+                            label_ruolo = ROLE_LABELS.get(ruolo_asta, ruolo_asta)
+                            if targ > 0:
+                                pct_now = int(round(100*curr/targ))
+                                pct_proj = int(round(100*projected/targ))
+                                st.info(f"{label_ruolo}: ora {curr}/{targ} ({pct_now}%) • dopo acquisto {projected}/{targ} ({pct_proj}%)")
+                                if projected > targ:
+                                    st.warning(f"Superi il target {label_ruolo} di {projected - targ} crediti.")
+
                         if st.button("Aggiungi alla squadra", key=f"add_{ruolo_asta}_{idx}"):
                             if st.session_state.squadre:
                                 team_sel = st.session_state.squadre[sel_team_idx]
