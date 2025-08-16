@@ -72,10 +72,10 @@ if "storico_acquisti" not in st.session_state:
 # Sidebar – Utility Lega
 # -------------------------------
 with st.sidebar:
-    st.title("⚙️ Utility Lega")
-    if st.button("🔄 Reset lega (ricrea squadre e azzera acquisti)"):
-        reset_lega()
-        st.warning("Lega resettata.")
+    with st.expander("⚙️ Utility Lega", expanded=False):
+        if st.button("🔄 Reset lega (ricrea squadre e azzera acquisti)"):
+            reset_lega()
+            st.warning("Lega resettata.")
 
 # -------------------------------
 # Header
