@@ -401,7 +401,7 @@ st.title("FantaGioia 2025/2026")
 # ===============================
 # UI: TABS PRINCIPALI (in alto)
 # ===============================
-tab_asta, tab_riepilogo, tab_acquisti, tab_nomi = st.tabs(["🔨 Asta", "📊 Riepilogo", "🛒 Acquisti", "✏️ Nomi"])
+tab_asta, tab_riepilogo, tab_acquisti, tab_nomi = st.tabs(["🔨 Asta", "📊 Riepilogo Squadre", "🛒 Acquisti", "✏️ Nomi Squadre"])
 
 with tab_riepilogo:
     for team in st.session_state.squadre:
