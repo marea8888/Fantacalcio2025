@@ -545,6 +545,51 @@ with tab_asta:
                         )
                         prezzo_sel = st.number_input("Prezzo di aggiudicazione", min_value=0, step=1, key=f"prezzo_{ruolo_asta}_{idx}")
 
+                        # Commento spiritoso vs range stimato del giocatore (inline, senza dipendenze esterne)
+                        rng_col = cols_lower.get('pfcrange')
+                        rng_val = None
+                        try:
+                            rng_val = rec[rng_col] if rng_col else None
+                        except Exception:
+                            rng_val = None
+
+                        def _extract_ints(text):
+                            if text is None:
+                                return []
+                            s = str(text)
+                            out, buf = [], ""
+                            for ch in s:
+                                if ch.isdigit():
+                                    buf += ch
+                                else:
+                                    if buf:
+                                        out.append(int(buf))
+                                        buf = ""
+                            if buf:
+                                out.append(int(buf))
+                            return out
+
+                        nums = _extract_ints(rng_val)
+                        low = high = None
+                        if len(nums) >= 2:
+                            a, b = nums[0], nums[1]
+                            low, high = (a, b) if a <= b else (b, a)
+                        elif len(nums) == 1:
+                            low = high = nums[0]
+
+                        if low is not None and high is not None:
+                            price_now = int(prezzo_sel)
+                            if price_now <= max(1, int(low * 0.90)):
+                                st.success(f"Colpaccio!! 🎯 ({price_now} vs range {low}-{high})")
+                            elif price_now < low:
+                                st.success(f"Ottimo prezzo ✅ ({price_now} sotto {low}-{high})")
+                            elif low <= price_now <= high:
+                                st.info(f"Prezzo in linea col mercato 👍 ({low}-{high})")
+                            elif price_now <= int(high * 1.15):
+                                st.warning(f"Sovrapprezzo leggero 🤏 ({price_now} oltre {high})")
+                            else:
+                                st.error(f"Fuori mercato 💸 ({price_now} >> {high})")
+
                         # Monitor spesa reparto per la mia squadra (preview post-acquisto)
                         if sel_team_idx == st.session_state.get("user_team_idx", -1):
                             team_sel = st.session_state.squadre[sel_team_idx]
