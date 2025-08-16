@@ -146,8 +146,11 @@ def load_sheet_from_drive(file_id: str, sheet_name: str) -> pd.DataFrame:
     """
     # Link diretto al contenuto xlsx esportato
     url = f"https://drive.google.com/uc?export=download&id={file_id}"
-    df = pd.read_excel(url, sheet_name=sheet_name, engine="openpyxl")
-    return df
+    try:
+        df = pd.read_excel(url, sheet_name=sheet_name)
+        return df
+    except ImportError as e:
+        raise RuntimeError("Per leggere file Excel è necessario installare la libreria 'openpyxl'. Esegui: pip install openpyxl")
 
 def rotate_from_letter(df: pd.DataFrame, col_name: str, letter: str) -> pd.DataFrame:
     if col_name not in df.columns:
