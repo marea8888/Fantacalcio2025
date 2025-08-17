@@ -235,6 +235,30 @@ def rotate_from_letter(df: pd.DataFrame, col_name: str, letter: str) -> pd.DataF
     rotated = pd.concat([rotated, base[~initials.isin(alphabet)]], ignore_index=True)
     return rotated
 
+# Helper: parse range stimato (es. '32-48' → (32,48))
+def parse_pfcrange_cell(val):
+    try:
+        if val is None:
+            return (None, None)
+        s = str(val)
+        nums, buf = [], ''
+        for ch in s:
+            if ch.isdigit():
+                buf += ch
+            else:
+                if buf:
+                    nums.append(int(buf)); buf=''
+        if buf:
+            nums.append(int(buf))
+        if len(nums) >= 2:
+            a,b = nums[0], nums[1]
+            return (a,b) if a<=b else (b,a)
+        if len(nums) == 1:
+            return (nums[0], nums[0])
+        return (None, None)
+    except Exception:
+        return (None, None)
+
 # ===============================
 # LOOKUP SLOT PER GIOCATORE (da fogli Excel)
 # ===============================
@@ -376,7 +400,7 @@ with st.sidebar:
 st.title("Fantacalcio – Gestore Lega")
 st.caption(f"Impostazioni fissate da codice: {st.session_state.settings['num_squadre']} squadre, {st.session_state.settings['crediti']} crediti, rosa 3P/8D/8C/6A, doppioni NON consentiti.")
 
-tab_asta, tab_riepilogo, tab_acquisti, tab_nomi = st.tabs(["🔨 Asta", "📊 Riepilogo", "🛒 Acquisti", "✏️ Nomi"])
+tab_asta, tab_call, tab_riepilogo, tab_acquisti, tab_nomi = st.tabs(["🔨 Asta", "📞 Giocatore a chiamata", "📊 Riepilogo", "🛒 Acquisti", "✏️ Nomi"])
 
 # ===============================
 # TAB: RIEPILOGO (tutte le squadre)
@@ -430,7 +454,89 @@ with tab_nomi:
                 save_state()
 
 # ===============================
+# TAB: GIOCATORE A CHIAMATA
+# ===============================
+with tab_call:
+    st.subheader("Giocatore a chiamata")
+    c1, c2 = st.columns([2,1])
+    with c1:
+        ruolo_call = st.radio("Ruolo", RUOLI, horizontal=True, key="ruolo_call")
+    with c2:
+        budget_call = st.number_input("Crediti da spendere", min_value=0, step=1, key="budget_call")
+
+    try:
+        df_raw = load_sheet_from_drive(ruolo_call)
+        if df_raw.empty or NAME_COL not in df_raw.columns:
+            st.info("Dati non disponibili per questo ruolo.")
+        else:
+            df = df_raw.copy()
+            df[NAME_COL] = df[NAME_COL].astype(str).str.strip()
+            # Escludi già assegnati
+            taken = {str(n).strip().upper() for n in elenco_giocatori_global()}
+            df = df[~df[NAME_COL].str.upper().isin(taken)].reset_index(drop=True)
+
+            cols_l = {c.lower(): c for c in df.columns}
+            team_c = cols_l.get('team')
+            slot_c = cols_l.get('slot')
+            range_c = cols_l.get('pfcrange')
+            fm_c = cols_l.get('expectedfantamedia')
+
+            if not range_c:
+                st.warning("Nel file non è presente la colonna 'pfcRange' per stimare il prezzo.")
+            else:
+                # Calcola low/high e filtra in base al budget_call
+                lows, highs, keeps = [], [], []
+                for v in df[range_c].fillna(""):
+                    lo, hi = parse_pfcrange_cell(v)
+                    lows.append(lo)
+                    highs.append(hi)
+                for lo, hi in zip(lows, highs):
+                    if lo is None or hi is None:
+                        keeps.append(False)
+                    else:
+                        keeps.append(lo <= int(budget_call) <= hi)
+                df = df[keeps].copy()
+
+                # Arricchisci per ordinamento e output
+                if slot_c:
+                    df["_slot_num"] = pd.to_numeric(df[slot_c].astype(str).str.extract(r"(\d+)")[0], errors='coerce')
+                else:
+                    df["_slot_num"] = pd.NA
+                df["_slot_num"] = df["_slot_num"].fillna(9999)
+
+                # Costruisci tabella di output
+                out_cols = {}
+                if slot_c: out_cols["Slot"] = df[slot_c]
+                out_cols["Nome"] = df[NAME_COL]
+                if team_c: out_cols["Squadra"] = df[team_c]
+                out_cols["Range Stimato"] = df[range_c]
+                if fm_c: out_cols["Fantamedia Stimata"] = df[fm_c]
+                df_out = pd.DataFrame(out_cols)
+
+                # Ordina: primi slot → secondi → ... poi Nome
+                df_out["_slot_num"] = df["_slot_num"].values
+                # Ordina: Slot crescente → Fantamedia desc → Nome
+if fm_c:
+    df_out["_fm"] = pd.to_numeric(df[fm_c], errors='coerce')
+else:
+    df_out["_fm"] = pd.NA
+try:
+    df_out["_fm"] = df_out["_fm"].fillna(float('-inf'))
+except Exception:
+    df_out["_fm"] = -1e18
+# conserva lo slot numerico per l'ordinamento
+df_out["_slot_num"] = df["_slot_num"].values
+# sort finale
+df_out = df_out.sort_values(["_slot_num", "_fm", "Nome"], ascending=[True, False, True], kind="mergesort").drop(columns=["_slot_num", "_fm"])  # mergesort stabile
+
+                st.caption(f"Trovati {len(df_out)} giocatori per {ruolo_call} con budget {int(budget_call)}")
+                st.dataframe(df_out, use_container_width=True, hide_index=True)
+    except Exception as e:
+        st.error(str(e))
+
+# ===============================
 # TAB: ASTA – RUOLO & LETTERA + CARD GIOCATORE
+# =============================== – RUOLO & LETTERA + CARD GIOCATORE
 # ===============================
 with tab_asta:
     col_a, col_b = st.columns([1,1])
@@ -712,16 +818,3 @@ with tab_asta:
                                     if names:
                                         item_list = ''.join(f'<li>{n}</li>' for n in names)
                                         html = f"<div class='tooltip-row'><span class='hint'>• Slot {val}: {cnt} disponibili</span><div class='tip'><strong>Giocatori disponibili (Slot {val})</strong><ul>{item_list}</ul></div></div>"
-                                    else:
-                                        html = f"<div class='tooltip-row'><span class='hint'>• Slot {val}: {cnt} disponibili</span></div>"
-                                    st.markdown(html, unsafe_allow_html=True)
-                        else:
-                            st.caption("Colonna 'Slot' assente nel file.")
-    except Exception as e:
-        st.error(str(e))
-
-# ===============================
-# FOOTER
-# ===============================
-st.markdown("---")
-st.caption("Doppioni disattivati per design: un giocatore può appartenere a una sola squadra.")
