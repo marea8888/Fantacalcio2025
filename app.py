@@ -491,10 +491,10 @@ with tab_call:
                     lows.append(lo)
                     highs.append(hi)
                 for lo, hi in zip(lows, highs):
-                    if lo is None or hi is None:
+                    if hi is None:
                         keeps.append(False)
                     else:
-                        keeps.append(lo <= int(budget_call) <= hi)
+                        keeps.append(int(budget_call) <= hi)
                 df = df[keeps].copy()
 
                 # Arricchisci per ordinamento e output
