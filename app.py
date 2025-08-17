@@ -535,8 +535,8 @@ st.title("Fantacalcio – Gestore Lega")
 st.caption(f"Impostazioni fissate da codice: {st.session_state.settings['num_squadre']} squadre, {st.session_state.settings['crediti']} crediti, rosa 3P/8D/8C/6A, doppioni NON consentiti.")
 
 # Ordine: Asta come tab predefinito
-tab_asta, tab_call, tab_riepilogo, tab_acquisti, tab_nomi = st.tabs([
-    "🔨 Asta", "📞 Giocatore a chiamata", "📊 Riepilogo", "🛒 Acquisti", "✏️ Nomi"
+tab_asta, tab_call, tab_riepilogo, tab_nomi = st.tabs([
+    "🔨 Asta", "📞 Giocatore a chiamata", "📊 Riepilogo", "✏️ Nomi"
 ])
 
 # ===============================
@@ -559,31 +559,6 @@ with tab_riepilogo:
                     st.markdown("\n".join(f"- {x}" for x in items))
                 else:
                     st.markdown(f"**{label}**: _nessuno_")
-
-# ===============================
-# TAB: ACQUISTI MANUALI
-# ===============================
-with tab_acquisti:
-    nome_g = st.text_input("Nome giocatore")
-    ruolo_g = st.selectbox("Ruolo", RUOLI)
-    prezzo_g = st.number_input("Prezzo", min_value=0, step=1)
-    dest_name = st.selectbox("Squadra", [t.nome for t in st.session_state.squadre], key="dest_name_sel")
-    if st.button("Aggiungi"):
-        team = next(t for t in st.session_state.squadre if t.nome == dest_name)
-        if aggiungi_giocatore(team, nome_g, ruolo_g, int(prezzo_g)):
-            st.success(f"{nome_g} aggiunto a {team.nome}.")
-        else:
-            st.error("Impossibile aggiungere il giocatore.")
-
-    squadra_r = st.selectbox("Squadra per rimuovere", [t.nome for t in st.session_state.squadre], key="squadra_r_sel")
-    ruolo_r = st.selectbox("Ruolo da cui rimuovere", RUOLI, key="ruolo_r_sel")
-    team_r = next(t for t in st.session_state.squadre if t.nome == squadra_r)
-    gioc_r = st.selectbox("Giocatore", [g.nome for g in team_r.rosa[ruolo_r]] if team_r.rosa[ruolo_r] else ["—"], key="gioc_r_sel")
-    if st.button("Rimuovi"):
-        if gioc_r != "—" and rimuovi_giocatore(team_r, ruolo_r, gioc_r):
-            st.success(f"{gioc_r} rimosso da {team_r.nome}.")
-        else:
-            st.error("Impossibile rimuovere il giocatore.")
 
 # ===============================
 # TAB: NOMI SQUADRE (rinomina)
