@@ -339,23 +339,30 @@ def load_all_extra_df() -> pd.DataFrame:
         raise RuntimeError(f"Errore lettura file Drive (Tutti): {e}")
 
 @st.cache_data(show_spinner=False)
-def build_extra_indices() -> Tuple[Dict[str, Dict[str, object]], Dict[str, List[Tuple[str, Dict[str, object]]]]]:
-    """Costruisce due indici:
-    - by_role_name: key "RUOLO|nome_norm" → {Qt.A, FVM}
-    - by_name: key "nome_norm" → lista di tuple (ruolo, {Qt.A, FVM}) per fallback se non matcha il ruolo
+def build_extra_lookup() -> Dict[str, Dict[str, object]]:
+    """Crea mapping preciso dal file 2 (sheet 'Tutti') usando ESATTAMENTE le colonne:
+    - Ruolo: colonna "R"
+    - Nome:  colonna "Nome"
+    Restituisce: dict con chiave "RUOLO|nome_norm" → {"Qt.A":..., "FVM":...}
     """
-    by_role_name: Dict[str, Dict[str, object]] = {}
-    by_name: Dict[str, List[Tuple[str, Dict[str, object]]]] = {}
+    mapping: Dict[str, Dict[str, object]] = {}
     try:
         df = load_all_extra_df()
         if df is None or df.empty:
-            return by_role_name, by_name
+            return mapping
 
-        # Canonicalizza colonne
+        # Helper per trovare colonne con match case-insensitive ma precisi sui nomi
+        def find_col(df: pd.DataFrame, targets: List[str]) -> str | None:
+            cols = list(df.columns)
+            for t in targets:
+                for c in cols:
+                    if str(c).strip().lower() == t.strip().lower():
+                        return c
+            return None        # Canonicalizza colonne
         colmap = {canon_colname(c): c for c in df.columns}
         name_col = colmap.get('nome') or colmap.get('name')
         # Ruolo: prova colonne con nome "ruolo/role", altrimenti fallback a colonna R (index 17)
-        ruolo_col = colmap.get('R') or colmap.get('R')
+        ruolo_col = colmap.get('ruolo') or colmap.get('role')
         ruolo_series = None
         if ruolo_col:
             ruolo_series = df[ruolo_col]
@@ -417,17 +424,54 @@ def build_extra_indices() -> Tuple[Dict[str, Dict[str, object]], Dict[str, List[
 
 
 def get_all_metrics(ruolo: str, nome: str) -> Dict[str, object]:
+    """Estrae Qt.A e FVM dal file 2 (sheet 'Tutti') usando ESATTAMENTE:
+    - Ruolo dalla colonna 'R'
+    - Nome dalla colonna 'Nome'
+    Il match del nome è normalizzato (accenti/punteggiatura), il ruolo è confrontato sulla prima lettera (P/D/C/A).
+    """
     try:
-        by_role_name, by_name = build_extra_indices()
-        key = f"{ruolo}|{norm_name(nome)}"
-        if key in by_role_name:
-            return by_role_name[key]
-        # Fallback: unico match per nome a prescindere dal ruolo
-        lst = by_name.get(norm_name(nome), [])
-        if len(lst) == 1:
-            return lst[0][1]
-        # Altrimenti nessun dato
-        return {}
+        df = load_all_extra_df()
+        if df is None or df.empty:
+            return {}
+
+        # Trova colonne richieste (case-insensitive ma sui nomi esatti indicati)
+        def find_col(targets):
+            tset = {str(t).strip().lower() for t in targets}
+            for c in df.columns:
+                if str(c).strip().lower() in tset:
+                    return c
+            return None
+
+        nome_col = find_col(["Nome"]) or find_col(["name"])  # fallback prudenziale
+        ruolo_col = find_col(["R"])  # **obbligatoria** per specifica
+        qta_col  = find_col(["Qt.A", "Qt A", "QTA"])  # supporta varianti comuni
+        fvm_col  = find_col(["FVM"])  # FVM
+
+        if not nome_col or not ruolo_col:
+            return {}
+
+        target_name = norm_name(nome)
+        target_role = (ruolo or "").strip().upper()[:1]
+
+        # Filtra per nome normalizzato
+        name_norm_series = df[nome_col].astype(str).map(norm_name)
+        mask = name_norm_series == target_name
+        if not mask.any():
+            return {}
+        sub = df[mask].copy()
+        # Filtra per ruolo (prima lettera)
+        role_first = sub[ruolo_col].astype(str).str.strip().str.upper().str[:1]
+        sub = sub[role_first == target_role]
+        if sub.empty:
+            return {}
+
+        row = sub.iloc[0]
+        out = {}
+        if qta_col and qta_col in df.columns:
+            out["Qt.A"] = row[qta_col]
+        if fvm_col and fvm_col in df.columns:
+            out["FVM"] = row[fvm_col]
+        return out
     except Exception:
         return {}
 
@@ -932,6 +976,7 @@ with tab_asta:
                         except Exception:
                             st.caption("In gara: n/d")
 
+                        # Disponibilità per Slot (con tooltip dei nomi su hover)
                         slot_col = cols_lower.get('slot')
                         if slot_col and slot_col in df_view.columns:
                             ser = df_view[slot_col].dropna().astype(str).str.strip()
@@ -950,7 +995,7 @@ with tab_asta:
                                 order = order.sort_values(['slot_num','slot'], na_position='last')
                                 counts = ser.value_counts()
 
-                                # CSS tooltip (mostra lista su hover)
+                                # CSS tooltip (riusa lo stesso stile)
                                 st.markdown("""
                                 <style>
                                 .tooltip-row{position:relative;padding:4px 2px;}
