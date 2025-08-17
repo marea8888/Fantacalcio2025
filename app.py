@@ -2,7 +2,7 @@ import re
 import json
 import unicodedata
 from dataclasses import dataclass, field, asdict
-from typing import List, Dict, Tuple
+from typing import List, Dict
 from pathlib import Path
 
 import pandas as pd
@@ -49,7 +49,7 @@ FIELD_LABELS = {
     "pfcrange": "Range Stimato",
     "expectedfantamedia": "Fantamedia Stimata",
 }
-NAME_COL = "name"  # colonna con il nome del calciatore
+NAME_COL = "name"  # colonna con il nome del calciatore nel file 1
 ROLE_LABELS = {"P": "Porta", "D": "Difesa", "C": "Centrocampo", "A": "Attacco"}
 
 # ===============================
@@ -66,7 +66,7 @@ def strip_accents(s: str) -> str:
 
 def norm_name(s: str) -> str:
     """Normalizza un nome: rimuove accenti, punteggiatura, spazi multipli, lowercase.
-    Utile per match tra file con NAME in maiuscolo/minuscolo o con accenti.
+    Utile per lookup Slot dal file 1.
     """
     s = strip_accents(s).lower()
     s = re.sub(r"[^a-z0-9]+", " ", s)
@@ -74,8 +74,22 @@ def norm_name(s: str) -> str:
     return s
 
 
+def name_key(s: str) -> str:
+    """Chiave robusta per confrontare i nomi tra file 1 e file 2.
+    - rimuove accenti
+    - minuscolo
+    - tiene solo [a-z0-9] (spazi/punteggiatura rimossi) → es. "De Gea" → "degea"
+    """
+    try:
+        s = unicodedata.normalize("NFKD", str(s))
+        s = s.encode("ascii", "ignore").decode("ascii")
+    except Exception:
+        s = str(s)
+    s = s.lower()
+    return "".join(ch for ch in s if ch.isalnum())
+
+
 def canon_colname(s: str) -> str:
-    """Canonicalizza il nome colonna per ricerche fuzzy (rimuove non-alnum, lowercase)."""
     return re.sub(r"[^a-z0-9]", "", str(s).lower())
 
 # ===============================
@@ -122,7 +136,7 @@ def save_state():
         }
         PERSIST_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
-        pass  # evita crash se il file non è scrivibile
+        pass
 
 def load_state():
     try:
@@ -145,9 +159,7 @@ def load_state():
 if "_boot" not in st.session_state:
     loaded = load_state()
     if not loaded:
-        # Settings fissi
         st.session_state.settings = SETTINGS.copy()
-        # Squadre di default
         def _init_default_squadre() -> List[Squadra]:
             arr = []
             for i in range(st.session_state.settings["num_squadre"]):
@@ -156,7 +168,6 @@ if "_boot" not in st.session_state:
             return arr
         st.session_state.squadre = _init_default_squadre()
         st.session_state.storico_acquisti = []
-        # Segui di default Terzetto Scherzetto
         default_idx = 0
         for i, t in enumerate(st.session_state.squadre):
             if t.nome == "Terzetto Scherzetto":
@@ -165,18 +176,15 @@ if "_boot" not in st.session_state:
         st.session_state.my_team_idx = default_idx
         st.session_state.user_team_idx = default_idx
         save_state()
-    # Allinea il numero di squadre alla nuova regola (10)
     desired = 10
     if st.session_state.settings.get("num_squadre") != desired:
         st.session_state.settings["num_squadre"] = desired
-    # Aggiungi squadre mancanti se servono (non rimuove se >10)
     if len(st.session_state.squadre) < desired:
         start_i = len(st.session_state.squadre)
         for i in range(start_i, desired):
             nome = "Terzetto Scherzetto" if i == 0 else f"Squadra {i+1}"
             st.session_state.squadre.append(Squadra(nome, st.session_state.settings["crediti"]))
         save_state()
-
     st.session_state._boot = True
 
 # ===============================
@@ -296,7 +304,6 @@ def parse_pfcrange_cell(val):
 # ===============================
 @st.cache_data(show_spinner=False)
 def build_slot_lookup() -> Dict[str, str]:
-    """Ritorna mapping "RUOLO|nome_norm" → Slot (come string)."""
     mapping: Dict[str, str] = {}
     for sheet in RUOLI:
         try:
@@ -339,139 +346,50 @@ def load_all_extra_df() -> pd.DataFrame:
         raise RuntimeError(f"Errore lettura file Drive (Tutti): {e}")
 
 @st.cache_data(show_spinner=False)
-def build_extra_lookup() -> Dict[str, Dict[str, object]]:
-    """Crea mapping preciso dal file 2 (sheet 'Tutti') usando ESATTAMENTE le colonne:
-    - Ruolo: colonna "R"
-    - Nome:  colonna "Nome"
-    Restituisce: dict con chiave "RUOLO|nome_norm" → {"Qt.A":..., "FVM":...}
+def build_extra_index() -> Dict[str, Dict[str, object]]:
+    """Crea mapping dal file 2 (sheet 'Tutti') usando **esattamente**:
+    - Ruolo dalla colonna "R" (prima lettera)
+    - Nome dalla colonna "Nome"
+    Chiave: "R|name_key(Nome)" → {"Qt.A", "FVM"}
     """
     mapping: Dict[str, Dict[str, object]] = {}
     try:
         df = load_all_extra_df()
         if df is None or df.empty:
             return mapping
-
-        # Helper per trovare colonne con match case-insensitive ma precisi sui nomi
-        def find_col(df: pd.DataFrame, targets: List[str]) -> str | None:
-            cols = list(df.columns)
-            for t in targets:
-                for c in cols:
-                    if str(c).strip().lower() == t.strip().lower():
-                        return c
-            return None        # Canonicalizza colonne
-        colmap = {canon_colname(c): c for c in df.columns}
-        name_col = colmap.get('nome') or colmap.get('name')
-        # Ruolo: prova colonne con nome "ruolo/role", altrimenti fallback a colonna R (index 17)
-        ruolo_col = colmap.get('ruolo') or colmap.get('role')
-        ruolo_series = None
-        if ruolo_col:
-            ruolo_series = df[ruolo_col]
-        elif df.shape[1] > 17:
-            ruolo_series = df.iloc[:, 17]
-        # Qt.A & FVM: cerca in maniera robusta
-        qta_col = None
-        for key in colmap:
-            if re.fullmatch(r"qt\.?a", key) or key in ("qta", "qta_", "qta0", "qta1"):
-                qta_col = colmap[key]
-                break
-        if not qta_col:
-            # prova a trovare una colonna che contiene "qta"
-            for key in colmap:
-                if "qta" in key:
-                    qta_col = colmap[key]; break
-        fvm_col = None
-        for key in colmap:
-            if key == 'fvm' or key.endswith('fvm'):
-                fvm_col = colmap[key]
-                break
-
-        if not name_col or ruolo_series is None:
-            return by_role_name, by_name
-
-        for i, row in df.iterrows():
-            try:
-                nome_raw = str(row[name_col]).strip()
-                if not nome_raw:
-                    continue
-                nome_n = norm_name(nome_raw)
-
-                ruolo_val = str(ruolo_series.iloc[i]).strip().upper() if ruolo_series is not None else ''
-                ruolo = ruolo_val[:1] if ruolo_val else ''
-                if ruolo not in RUOLI:
-                    # prova a dedurre dalla parola intera
-                    if ruolo_val.startswith("P"):
-                        ruolo = "P"
-                    elif ruolo_val.startswith("D"):
-                        ruolo = "D"
-                    elif ruolo_val.startswith("C"):
-                        ruolo = "C"
-                    elif ruolo_val.startswith("A"):
-                        ruolo = "A"
-                    else:
-                        continue
-
-                qta_val = row[qta_col] if qta_col in df.columns else None
-                fvm_val = row[fvm_col] if fvm_col in df.columns else None
-                metrics = {"Qt.A": qta_val, "FVM": fvm_val}
-
-                by_role_name[f"{ruolo}|{nome_n}"] = metrics
-                by_name.setdefault(nome_n, []).append((ruolo, metrics))
-            except Exception:
-                continue
-        return by_role_name, by_name
-    except Exception:
-        return by_role_name, by_name
-
-
-def get_all_metrics(ruolo: str, nome: str) -> Dict[str, object]:
-    """Estrae Qt.A e FVM dal file 2 (sheet 'Tutti') usando ESATTAMENTE:
-    - Ruolo dalla colonna 'R'
-    - Nome dalla colonna 'Nome'
-    Il match del nome è normalizzato (accenti/punteggiatura), il ruolo è confrontato sulla prima lettera (P/D/C/A).
-    """
-    try:
-        df = load_all_extra_df()
-        if df is None or df.empty:
-            return {}
-
-        # Trova colonne richieste (case-insensitive ma sui nomi esatti indicati)
         def find_col(targets):
             tset = {str(t).strip().lower() for t in targets}
             for c in df.columns:
                 if str(c).strip().lower() in tset:
                     return c
             return None
-
         nome_col = find_col(["Nome"]) or find_col(["name"])  # fallback prudenziale
-        ruolo_col = find_col(["R"])  # **obbligatoria** per specifica
-        qta_col  = find_col(["Qt.A", "Qt A", "QTA"])  # supporta varianti comuni
-        fvm_col  = find_col(["FVM"])  # FVM
-
+        ruolo_col = find_col(["R"])  # obbligatoria
+        qta_col  = find_col(["Qt.A", "Qt A", "QTA"])
+        fvm_col  = find_col(["FVM"])
         if not nome_col or not ruolo_col:
-            return {}
+            return mapping
+        name_keys = df[nome_col].astype(str).map(name_key)
+        role_first = df[ruolo_col].astype(str).str.strip().str.upper().str[:1]
+        for i, row in df.iterrows():
+            r = role_first.iloc[i]
+            if r not in RUOLI:
+                continue
+            key = f"{r}|{name_keys.iloc[i]}"
+            mapping[key] = {
+                "Qt.A": (row[qta_col] if qta_col in df.columns else None) if qta_col else None,
+                "FVM": (row[fvm_col] if fvm_col in df.columns else None) if fvm_col else None,
+            }
+        return mapping
+    except Exception:
+        return mapping
 
-        target_name = norm_name(nome)
-        target_role = (ruolo or "").strip().upper()[:1]
 
-        # Filtra per nome normalizzato
-        name_norm_series = df[nome_col].astype(str).map(norm_name)
-        mask = name_norm_series == target_name
-        if not mask.any():
-            return {}
-        sub = df[mask].copy()
-        # Filtra per ruolo (prima lettera)
-        role_first = sub[ruolo_col].astype(str).str.strip().str.upper().str[:1]
-        sub = sub[role_first == target_role]
-        if sub.empty:
-            return {}
-
-        row = sub.iloc[0]
-        out = {}
-        if qta_col and qta_col in df.columns:
-            out["Qt.A"] = row[qta_col]
-        if fvm_col and fvm_col in df.columns:
-            out["FVM"] = row[fvm_col]
-        return out
+def get_all_metrics(ruolo: str, nome: str) -> Dict[str, object]:
+    try:
+        idx = build_extra_index()
+        key = f"{(ruolo or '').strip().upper()[:1]}|{name_key(nome)}"
+        return idx.get(key, {})
     except Exception:
         return {}
 
@@ -501,7 +419,7 @@ def ratio_color_hex(r: float) -> str:
 # ===============================
 if "settings" in st.session_state:
     st.session_state.settings.setdefault("auto_refresh_enabled", True)
-    st.session_state.settings.setdefault("auto_refresh_ms", 5000)  # 5 secondi
+    st.session_state.settings.setdefault("auto_refresh_ms", 5000)
 
 
 def apply_auto_refresh():
@@ -546,7 +464,6 @@ with st.sidebar:
             badge_html = f" <span style='background:#DC2626;color:#fff;border-radius:12px;padding:2px 6px;margin-left:6px;'>+{s - t}</span>" if s > t else ""
             header_html = f"<strong>{label} ({count}/{quota}) — {s}/{t} (<span style='color:{pct_color}'>{pct_int}%</span>)</strong>{badge_html}"
 
-            # Elenco giocatori con Slot → HTML
             items = []
             for g in my_team.rosa[r]:
                 _slot = get_slot_for(g.nome, r)
@@ -556,7 +473,6 @@ with st.sidebar:
                     items.append(f"{g.nome} ({g.prezzo})")
             items_html = "<ul style='margin:6px 0 0 18px;padding:0;'>" + "".join(f"<li>{n}</li>" for n in items) + "</ul>" if items else "<em>nessuno</em>"
 
-            # Barra + bordo condizionale
             bar_color = ratio_color_hex(min(ratio,1.0))
             width_pct = int(round(min(ratio,1.0)*100))
             border_col = "#FCA5A5" if s > t else "#E5E7EB"
@@ -657,7 +573,6 @@ with tab_call:
         else:
             df = df_raw.copy()
             df[NAME_COL] = df[NAME_COL].astype(str).str.strip()
-            # Escludi già assegnati
             taken = {str(n).strip().upper() for n in elenco_giocatori_global()}
             df = df[~df[NAME_COL].str.upper().isin(taken)].reset_index(drop=True)
 
@@ -670,7 +585,6 @@ with tab_call:
             if not range_c:
                 st.warning("Nel file non è presente la colonna 'pfcRange' per stimare il prezzo.")
             else:
-                # Calcola low/high e filtra: MOSTRA chi ha max range >= budget inserito
                 lows, highs, keeps = [], [], []
                 for v in df[range_c].fillna(""):
                     lo, hi = parse_pfcrange_cell(v)
@@ -682,14 +596,12 @@ with tab_call:
                         keeps.append(int(budget_call) <= hi)
                 df = df[keeps].copy()
 
-                # Arricchisci per ordinamento e output
                 if slot_c:
                     df["_slot_num"] = pd.to_numeric(df[slot_c].astype(str).str.extract(r"(\d+)")[0], errors='coerce')
                 else:
                     df["_slot_num"] = pd.NA
                 df["_slot_num"] = df["_slot_num"].fillna(9999)
 
-                # Costruisci tabella di output
                 out_cols = {}
                 if slot_c: out_cols["Slot"] = df[slot_c]
                 out_cols["Nome"] = df[NAME_COL]
@@ -698,7 +610,6 @@ with tab_call:
                 if fm_c: out_cols["Fantamedia Stimata"] = df[fm_c]
                 df_out = pd.DataFrame(out_cols)
 
-                # Ordina: Slot crescente → Fantamedia desc → Nome
                 if fm_c:
                     df_out["_fm"] = pd.to_numeric(df[fm_c], errors='coerce')
                 else:
@@ -750,28 +661,22 @@ with tab_asta:
                 df_view = rotate_from_letter(df_raw, NAME_COL, st.session_state.get("lettera_estratta", ""))
                 df_view[NAME_COL] = df_view[NAME_COL].astype(str).fillna("").str.strip()
 
-                # Filtro: rimuovi i calciatori già assegnati a qualsiasi squadra
+                # Rimuovi calciatori già assegnati
                 def _norm(s):
                     return str(s).strip().upper()
                 taken = {_norm(n) for n in elenco_giocatori_global()}
-                if NAME_COL in df_view.columns:
-                    df_view = df_view[~df_view[NAME_COL].map(_norm).isin(taken)].reset_index(drop=True)
+                df_view = df_view[~df_view[NAME_COL].map(_norm).isin(taken)].reset_index(drop=True)
 
-                # 🔎 Cerca nella lista filtrata (nome/squadra/slot)
+                # 🔎 Cerca + Pulisci
                 search_key = f"search_{ruolo_asta}"
                 clear_flag_key = f"clear_flag_{ruolo_asta}"
-                # Se ho premuto "Pulisci" nel run precedente, resetta PRIMA di istanziare la text_input
                 if st.session_state.get(clear_flag_key):
                     st.session_state[search_key] = ""
                     st.session_state[clear_flag_key] = False
 
                 c_search, c_clear = st.columns([4,1])
                 with c_search:
-                    search_q = st.text_input(
-                        "🔎 Cerca",
-                        placeholder="Cerca per nome, squadra o slot…",
-                        key=search_key,
-                    )
+                    st.text_input("🔎 Cerca", placeholder="Cerca per nome, squadra o slot…", key=search_key)
                 with c_clear:
                     if st.button("Pulisci", key=f"clear_{ruolo_asta}"):
                         st.session_state[clear_flag_key] = True
@@ -780,21 +685,16 @@ with tab_asta:
                         except Exception:
                             st.experimental_rerun()
 
-                # Applica filtro se presente
-                search_q_val = st.session_state.get(search_key, "")
-                if search_q_val:
+                q = st.session_state.get(search_key, "").strip().lower()
+                if q:
                     cols_l = {c.lower(): c for c in df_view.columns}
-                    name_c = NAME_COL
                     team_c = cols_l.get('team')
                     slot_c = cols_l.get('slot')
-                    q = search_q_val.strip().lower()
-                    def _cont(v):
-                        return q in str(v).lower()
-                    mask = df_view[name_c].apply(_cont)
+                    mask = df_view[NAME_COL].astype(str).str.lower().str.contains(q)
                     if team_c:
-                        mask = mask | df_view[team_c].apply(_cont)
+                        mask |= df_view[team_c].astype(str).str.lower().str.contains(q)
                     if slot_c:
-                        mask = mask | df_view[slot_c].apply(_cont)
+                        mask |= df_view[slot_c].astype(str).str.lower().str.contains(q)
                     df_view = df_view[mask].reset_index(drop=True)
                 st.caption(f"Trovati {len(df_view)} calciatori")
 
@@ -802,13 +702,11 @@ with tab_asta:
                 if key_idx not in st.session_state:
                     st.session_state[key_idx] = 0
                 total = len(df_view)
-
                 if total == 0:
-                    st.info("Tutti i calciatori disponibili per questo ruolo risultano già assegnati.")
+                    st.info("Tutti i calciatori disponibili per questo ruolo risultano già assegnati o filtrati.")
                 else:
                     st.session_state[key_idx] = min(st.session_state[key_idx], total - 1)
 
-                    # NAV
                     c_nav1, c_nav2, c_nav3 = st.columns([1,3,1])
                     with c_nav1:
                         if st.button("◀︎", use_container_width=True, key=f"prev_{ruolo_asta}"):
@@ -821,18 +719,13 @@ with tab_asta:
 
                     idx = st.session_state[key_idx]
                     rec = df_view.iloc[idx]
-
-                    # Mappa colonne (riuso a sinistra e destra)
                     cols_lower = {c.lower(): c for c in df_view.columns}
 
-                    # CARD a due colonne
                     colL, colR = st.columns([2,1], vertical_alignment="top")
 
                     with colL:
                         st.subheader(rec[NAME_COL])
                         st.caption(f"Ruolo: {ruolo_asta}")
-
-                        # Mostra SOLO i campi richiesti
                         for key_lower, label in FIELD_LABELS.items():
                             real_col = cols_lower.get(key_lower)
                             if not real_col:
@@ -842,7 +735,7 @@ with tab_asta:
                                 continue
                             st.write(f"**{label}**: {val}")
 
-                        # Dati extra dal file "Tutti" (Qt.A, FVM) con match robusto su nome/ruolo
+                        # Extra dal file 2 (Tutti)
                         extras = get_all_metrics(ruolo_asta, rec[NAME_COL])
                         qt_extra = extras.get("Qt.A") if extras else None
                         fvm_extra = extras.get("FVM") if extras else None
@@ -867,14 +760,9 @@ with tab_asta:
                         )
                         prezzo_sel = st.number_input("Prezzo di aggiudicazione", min_value=0, step=1, key=f"prezzo_{ruolo_asta}_{idx}")
 
-                        # Commento spiritoso vs range stimato (pfcRange)
+                        # Commento vs range stimato
                         rng_col = cols_lower.get('pfcrange')
-                        rng_val = None
-                        try:
-                            rng_val = rec[rng_col] if rng_col else None
-                        except Exception:
-                            rng_val = None
-
+                        rng_val = rec[rng_col] if rng_col else None
                         def _extract_ints(text):
                             if text is None:
                                 return []
@@ -885,12 +773,10 @@ with tab_asta:
                                     buf += ch
                                 else:
                                     if buf:
-                                        out.append(int(buf))
-                                        buf = ""
+                                        out.append(int(buf)); buf = ""
                             if buf:
                                 out.append(int(buf))
                             return out
-
                         nums = _extract_ints(rng_val)
                         low = high = None
                         if len(nums) >= 2:
@@ -898,7 +784,6 @@ with tab_asta:
                             low, high = (a, b) if a <= b else (b, a)
                         elif len(nums) == 1:
                             low = high = nums[0]
-
                         if low is not None and high is not None:
                             price_now = int(prezzo_sel)
                             if price_now <= max(1, int(low * 0.90)):
@@ -906,9 +791,9 @@ with tab_asta:
                             elif price_now < low:
                                 st.success(f"Ottimo prezzo ✅ ({price_now} sotto {low}-{high})")
                             elif low <= price_now <= high:
-                                st.info(f"Prezzo in linea col mercato 👍 ({low}-{high})")
+                                st.info(f"Prezzo in linea 👍 ({low}-{high})")
                             elif price_now <= int(high * 1.15):
-                                st.warning(f"Sovrapprezzo leggero 🤏 ({price_now} oltre {high})")
+                                st.warning(f"Sovrapprezzo 🤏 ({price_now} sopra {high})")
                             else:
                                 st.error(f"Fuori mercato 💸 ({price_now} >> {high})")
 
@@ -922,27 +807,26 @@ with tab_asta:
                             if targ > 0:
                                 pct_now = int(round(100*curr/targ))
                                 pct_proj = int(round(100*projected/targ))
-                                st.info(f"{label_ruolo}: ora {curr}/{targ} ({pct_now}%) • dopo acquisto {projected}/{targ} ({pct_proj}%)")
+                                st.info(f"{label_ruolo}: ora {curr}/{targ} ({pct_now}%) • dopo {projected}/{targ} ({pct_proj}%)")
                                 if projected > targ:
                                     st.warning(f"Superi il target {label_ruolo} di {projected - targ} crediti.")
 
                         if st.button("Aggiungi alla squadra", key=f"add_{ruolo_asta}_{idx}"):
-                            if st.session_state.squadre:
-                                team_sel = st.session_state.squadre[sel_team_idx]
-                                ok = aggiungi_giocatore(team_sel, rec[NAME_COL], ruolo_asta, int(prezzo_sel))
-                                if ok:
-                                    st.success(f"{rec[NAME_COL]} aggiunto a {team_sel.nome} per {int(prezzo_sel)}.")
-                                    st.session_state[key_idx] = min(total-1, st.session_state[key_idx]+1)
-                                    try:
-                                        st.rerun()
-                                    except Exception:
-                                        st.experimental_rerun()
-                                else:
-                                    st.error("Impossibile aggiungere il giocatore: controlla crediti/quote/doppioni.")
+                            team_sel = st.session_state.squadre[sel_team_idx]
+                            ok = aggiungi_giocatore(team_sel, rec[NAME_COL], ruolo_asta, int(prezzo_sel))
+                            if ok:
+                                st.success(f"{rec[NAME_COL]} aggiunto a {team_sel.nome} per {int(prezzo_sel)}.")
+                                st.session_state[key_idx] = min(total-1, st.session_state[key_idx]+1)
+                                try:
+                                    st.rerun()
+                                except Exception:
+                                    st.experimental_rerun()
+                            else:
+                                st.error("Impossibile aggiungere: controlla crediti/quote/doppioni.")
 
                     with colR:
-                        st.subheader("📊 Disponibilità per Slot")
-                        # Quante squadre sono ancora in gara (non hanno completato il reparto)
+                        st.subheader("📊 Disponibilità")
+                        # In gara (squadre non complete per questo reparto)
                         try:
                             quota = st.session_state.settings['quote_rosa'][ruolo_asta]
                             incomplete = [
@@ -951,8 +835,6 @@ with tab_asta:
                                 if len(t.rosa[ruolo_asta]) < quota
                             ]
                             squadre_in_gara = len(incomplete)
-
-                            # CSS tooltip (mostra lista squadre su hover)
                             st.markdown("""
                             <style>
                             .tooltip-row{position:relative;padding:4px 2px;}
@@ -962,17 +844,16 @@ with tab_asta:
                             .tooltip-row .tip ul{margin:6px 0 0 18px;padding:0;max-height:260px;overflow:auto;} 
                             </style>
                             """, unsafe_allow_html=True)
-
                             if squadre_in_gara > 0:
                                 li = []
                                 for name, miss in incomplete:
                                     miss_txt = f"manca {miss}" if miss == 1 else f"mancano {miss}"
                                     li.append(f"<li>{name} — {miss_txt}</li>")
                                 items_html = "".join(li)
-                                html = f"<div class='tooltip-row'><span class='hint'>• In gara (squadre non complete): {squadre_in_gara}</span><div class='tip'><strong>Squadre in gara</strong><ul>{items_html}</ul></div></div>"
+                                html = f"<div class='tooltip-row'><span class='hint'>• In gara: {squadre_in_gara}</span><div class='tip'><strong>Squadre non complete</strong><ul>{items_html}</ul></div></div>"
                                 st.markdown(html, unsafe_allow_html=True)
                             else:
-                                st.markdown(f"<div class='tooltip-row'><span class='hint'>• In gara (squadre non complete): 0</span></div>", unsafe_allow_html=True)
+                                st.markdown(f"<div class='tooltip-row'><span class='hint'>• In gara: 0</span></div>", unsafe_allow_html=True)
                         except Exception:
                             st.caption("In gara: n/d")
 
@@ -983,19 +864,15 @@ with tab_asta:
                             if len(ser) == 0:
                                 st.write("_Nessun dato disponibile_")
                             else:
-                                # Mappa nomi disponibili per slot (dal dataset filtrato)
                                 df_slots = df_view[[slot_col, NAME_COL]].dropna(subset=[slot_col, NAME_COL]).copy()
                                 df_slots[slot_col] = df_slots[slot_col].astype(str).str.strip()
-                                names_by_slot = {}
-                                for sl, sub in df_slots.groupby(slot_col):
-                                    names_by_slot[str(sl)] = list(sub[NAME_COL].astype(str))
+                                names_by_slot = {str(sl): list(sub[NAME_COL].astype(str)) for sl, sub in df_slots.groupby(slot_col)}
 
                                 order = pd.DataFrame({'slot': ser}).drop_duplicates()
                                 order['slot_num'] = pd.to_numeric(order['slot'], errors='coerce')
                                 order = order.sort_values(['slot_num','slot'], na_position='last')
                                 counts = ser.value_counts()
 
-                                # CSS tooltip (riusa lo stesso stile)
                                 st.markdown("""
                                 <style>
                                 .tooltip-row{position:relative;padding:4px 2px;}
@@ -1005,7 +882,6 @@ with tab_asta:
                                 .tooltip-row .tip ul{margin:6px 0 0 18px;padding:0;max-height:260px;overflow:auto;} 
                                 </style>
                                 """, unsafe_allow_html=True)
-
                                 for val in order['slot']:
                                     cnt = int(counts.get(val, 0))
                                     names = names_by_slot.get(str(val), [])
