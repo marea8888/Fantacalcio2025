@@ -603,12 +603,38 @@ with tab_asta:
                     with colR:
                         st.subheader("📊 Disponibilità per Slot")
                         # Quante squadre sono ancora in gara (non hanno completato il reparto)
-                        try:
-                            quota = st.session_state.settings['quote_rosa'][ruolo_asta]
-                            squadre_in_gara = sum(1 for t in st.session_state.squadre if len(t.rosa[ruolo_asta]) < quota)
-                            st.caption(f"In gara (squadre non complete): {squadre_in_gara}")
-                        except Exception:
-                            st.caption("In gara: n/d")
+try:
+    quota = st.session_state.settings['quote_rosa'][ruolo_asta]
+    incomplete = [
+        (t.nome, max(quota - len(t.rosa[ruolo_asta]), 0))
+        for t in st.session_state.squadre
+        if len(t.rosa[ruolo_asta]) < quota
+    ]
+    squadre_in_gara = len(incomplete)
+
+    # CSS tooltip (mostra lista squadre su hover)
+    st.markdown("""
+    <style>
+    .tooltip-row{position:relative;padding:4px 2px;}
+    .tooltip-row .hint{cursor:default;}
+    .tooltip-row .tip{visibility:hidden;opacity:0;transition:opacity .15s ease;position:absolute;left:0;top:100%;background:#111;color:#fff;padding:8px 10px;border-radius:8px;z-index:1000;min-width:220px;max-width:420px;box-shadow:0 4px 12px rgba(0,0,0,.2);} 
+    .tooltip-row:hover .tip{visibility:visible;opacity:1;} 
+    .tooltip-row .tip ul{margin:6px 0 0 18px;padding:0;max-height:260px;overflow:auto;} 
+    </style>
+    """, unsafe_allow_html=True)
+
+    if squadre_in_gara > 0:
+        li = []
+        for name, miss in incomplete:
+            miss_txt = f"manca {miss}" if miss == 1 else f"mancano {miss}"
+            li.append(f"<li>{name} — {miss_txt}</li>")
+        items_html = "".join(li)
+        html = f"<div class='tooltip-row'><span class='hint'>• In gara (squadre non complete): {squadre_in_gara}</span><div class='tip'><strong>Squadre in gara</strong><ul>{items_html}</ul></div></div>"
+        st.markdown(html, unsafe_allow_html=True)
+    else:
+        st.markdown(f"<div class='tooltip-row'><span class='hint'>• In gara (squadre non complete): 0</span></div>", unsafe_allow_html=True)
+except Exception:
+    st.caption("In gara: n/d")
 
                         slot_col = cols_lower.get('slot')
                         if slot_col and slot_col in df_view.columns:
