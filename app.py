@@ -12,7 +12,7 @@ import streamlit as st
 # CONFIG APP
 # ===============================
 st.set_page_config(
-    page_title="Fantacalcio – Gestore Lega",
+    page_title="Fantacalcio 2025/2026",
     page_icon="⚽",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -29,7 +29,7 @@ SETTINGS = {
     "quote_rosa": QUOTE_ROSA.copy(),
     "no_doppioni": True,  # un giocatore può appartenere ad una sola squadra
     # Target personali (solo per Terzetto Scherzetto)
-    "spending_targets": {"P": 0.10, "D": 0.20, "C": 0.30, "A": 0.40},
+    "spending_targets": {"P": 0.08, "D": 0.18, "C": 0.28, "A": 0.46},
 }
 
 # Google Drive: file Excel con i fogli P/D/C/A e colonna "name"
@@ -676,7 +676,7 @@ with tab_asta:
         )
         st.session_state["lettera_estratta"] = (lettera_input or "").upper()
 
-    st.markdown("### 🎠 Calciatori (uno alla volta, in ordine dalla lettera estratta)")
+    st.markdown("### Lista Giocatori")
     try:
         df_raw = load_sheet_from_drive(ruolo_asta)
         if df_raw.empty:
@@ -923,8 +923,3 @@ with tab_asta:
     except Exception as e:
         st.error(str(e))
 
-# ===============================
-# FOOTER
-# ===============================
-st.markdown("---")
-st.caption("Doppioni disattivati per design: un giocatore può appartenere a una sola squadra.")
