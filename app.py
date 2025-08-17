@@ -41,7 +41,7 @@ FILE2_ID = "1e-0iZhQsavd5_G_KM1ePSXzCJgG0Kn-v"
 DRIVE2_XLSX_URL = f"https://drive.google.com/uc?export=download&id={FILE2_ID}"
 SHEET2_NAME = "Tutti"
 
-# Campi da visualizzare nella card giocatore (case-insensitive)
+# Campi visibili nella card giocatore (case-insensitive)
 FIELD_LABELS = {
     "team": "Squadra",
     "slot": "Slot",
@@ -53,7 +53,7 @@ NAME_COL = "name"  # colonna con il nome del calciatore nel file 1
 ROLE_LABELS = {"P": "Porta", "D": "Difesa", "C": "Centrocampo", "A": "Attacco"}
 
 # ===============================
-# UTILS DI NORMALIZZAZIONE (nomi e colonne)
+# UTILS DI NORMALIZZAZIONE
 # ===============================
 
 def strip_accents(s: str) -> str:
@@ -432,7 +432,7 @@ def apply_auto_refresh():
         st_autorefresh(interval=interval_ms, key="auto_refresh")
     except Exception:
         st.markdown(
-            f"<script>setTimeout(function(){{window.location.reload();}}, {interval_ms});</script>",
+            f"<script>setTimeout(function(){window.location.reload();}, {interval_ms});</script>",
             unsafe_allow_html=True,
         )
 
@@ -556,7 +556,7 @@ with tab_nomi:
                 save_state()
 
 # ===============================
-# TAB: GIOCATORE A CHIAMATA
+# TAB: GIOCATORE A CHIAMATA (Qt.A ≤ X, ordinati per Slot→FVM)
 # ===============================
 with tab_call:
     st.subheader("Giocatore a chiamata")
@@ -564,7 +564,7 @@ with tab_call:
     with c1:
         ruolo_call = st.radio("Ruolo", RUOLI, horizontal=True, key="ruolo_call")
     with c2:
-        budget_call = st.number_input("Crediti da spendere", min_value=0, step=1, key="budget_call")
+        qta_max = st.number_input("Qt.A massima (≤)", min_value=0, step=1, key="qta_max_call")
 
     try:
         df_raw = load_sheet_from_drive(ruolo_call)
@@ -573,6 +573,7 @@ with tab_call:
         else:
             df = df_raw.copy()
             df[NAME_COL] = df[NAME_COL].astype(str).str.strip()
+            # Escludi già assegnati
             taken = {str(n).strip().upper() for n in elenco_giocatori_global()}
             df = df[~df[NAME_COL].str.upper().isin(taken)].reset_index(drop=True)
 
@@ -582,47 +583,51 @@ with tab_call:
             range_c = cols_l.get('pfcrange')
             fm_c = cols_l.get('expectedfantamedia')
 
-            if not range_c:
-                st.warning("Nel file non è presente la colonna 'pfcRange' per stimare il prezzo.")
-            else:
-                lows, highs, keeps = [], [], []
-                for v in df[range_c].fillna(""):
-                    lo, hi = parse_pfcrange_cell(v)
-                    lows.append(lo); highs.append(hi)
-                for lo, hi in zip(lows, highs):
-                    if hi is None:
-                        keeps.append(False)
-                    else:
-                        keeps.append(int(budget_call) <= hi)
-                df = df[keeps].copy()
-
-                if slot_c:
-                    df["_slot_num"] = pd.to_numeric(df[slot_c].astype(str).str.extract(r"(\d+)")[0], errors='coerce')
-                else:
-                    df["_slot_num"] = pd.NA
-                df["_slot_num"] = df["_slot_num"].fillna(9999)
-
-                out_cols = {}
-                if slot_c: out_cols["Slot"] = df[slot_c]
-                out_cols["Nome"] = df[NAME_COL]
-                if team_c: out_cols["Squadra"] = df[team_c]
-                out_cols["Range Stimato"] = df[range_c]
-                if fm_c: out_cols["Fantamedia Stimata"] = df[fm_c]
-                df_out = pd.DataFrame(out_cols)
-
-                if fm_c:
-                    df_out["_fm"] = pd.to_numeric(df[fm_c], errors='coerce')
-                else:
-                    df_out["_fm"] = pd.NA
+            # Join con file 2: Qt.A e FVM
+            idx_extra = build_extra_index()
+            def _get_qta(name: str):
+                rec = idx_extra.get(f"{ruolo_call}|{name_key(name)}")
+                v = rec.get("Qt.A") if rec else None
                 try:
-                    df_out["_fm"] = df_out["_fm"].fillna(float('-inf'))
+                    return float(v)
                 except Exception:
-                    df_out["_fm"] = -1e18
-                df_out["_slot_num"] = df["_slot_num"].values
-                df_out = df_out.sort_values(["_slot_num", "_fm", "Nome"], ascending=[True, False, True], kind="mergesort").drop(columns=["_slot_num", "_fm"])  # mergesort stabile
+                    return None
+            def _get_fvm(name: str):
+                rec = idx_extra.get(f"{ruolo_call}|{name_key(name)}")
+                v = rec.get("FVM") if rec else None
+                try:
+                    return float(v)
+                except Exception:
+                    return None
+            df["_QtA"] = df[NAME_COL].map(_get_qta)
+            df["_FVM"] = df[NAME_COL].map(_get_fvm)
 
-                st.caption(f"Trovati {len(df_out)} giocatori per {ruolo_call} con budget {int(budget_call)}")
-                st.dataframe(df_out, use_container_width=True, hide_index=True)
+            # Filtro: Qt.A ≤ valore inserito (ignora i NaN)
+            df = df[df["_QtA"].notna() & (df["_QtA"] <= float(qta_max))].copy()
+
+            # Ordina: Slot asc (se presente), poi FVM desc, poi Nome
+            if slot_c:
+                df["_slot_num"] = pd.to_numeric(df[slot_c].astype(str).str.extract(r"(\d+)")[0], errors='coerce')
+            else:
+                df["_slot_num"] = pd.NA
+            df["_slot_num"] = df["_slot_num"].fillna(9999)
+
+            df["_FVM_sort"] = pd.to_numeric(df["_FVM"], errors='coerce').fillna(float('-inf'))
+            df = df.sort_values(["_slot_num", "_FVM_sort", NAME_COL], ascending=[True, False, True], kind="mergesort")
+
+            # Output columns
+            out_cols = {}
+            if slot_c: out_cols["Slot"] = df[slot_c]
+            out_cols["Nome"] = df[NAME_COL]
+            if team_c: out_cols["Squadra"] = df[team_c]
+            out_cols["Qt.A"] = df["_QtA"]
+            out_cols["FVM"] = df["_FVM"]
+            if range_c: out_cols["Range Stimato"] = df[range_c]
+            if fm_c: out_cols["Fantamedia Stimata (file1)"] = df[fm_c]
+            df_out = pd.DataFrame(out_cols).reset_index(drop=True)
+
+            st.caption(f"Trovati {len(df_out)} giocatori per {ruolo_call} con Qt.A ≤ {int(qta_max)}")
+            st.dataframe(df_out, use_container_width=True, hide_index=True)
     except Exception as e:
         st.error(str(e))
 
@@ -735,7 +740,7 @@ with tab_asta:
                                 continue
                             st.write(f"**{label}**: {val}")
 
-                        # Extra dal file 2 (Tutti)
+                        # Extra dal file 2 (Tutti): Qt.A & FVM
                         extras = get_all_metrics(ruolo_asta, rec[NAME_COL])
                         qt_extra = extras.get("Qt.A") if extras else None
                         fvm_extra = extras.get("FVM") if extras else None
