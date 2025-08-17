@@ -532,7 +532,6 @@ with st.sidebar:
 # UI: HEADER + TABS IN ALTO
 # ===============================
 st.title("Fanta Gioia 2025/2026")
-st.caption(f"Impostazioni fissate da codice: {st.session_state.settings['num_squadre']} squadre, {st.session_state.settings['crediti']} crediti, rosa 3P/8D/8C/6A, doppioni NON consentiti.")
 
 # Ordine: Asta come tab predefinito
 tab_asta, tab_call, tab_riepilogo, tab_nomi = st.tabs([
