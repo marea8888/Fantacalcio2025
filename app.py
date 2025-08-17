@@ -816,3 +816,16 @@ with tab_asta:
                                     if names:
                                         item_list = ''.join(f'<li>{n}</li>' for n in names)
                                         html = f"<div class='tooltip-row'><span class='hint'>• Slot {val}: {cnt} disponibili</span><div class='tip'><strong>Giocatori disponibili (Slot {val})</strong><ul>{item_list}</ul></div></div>"
+                                    else:
+                                        html = f"<div class='tooltip-row'><span class='hint'>• Slot {val}: {cnt} disponibili</span></div>"
+                                    st.markdown(html, unsafe_allow_html=True)
+                        else:
+                            st.caption("Colonna 'Slot' assente nel file.")
+    except Exception as e:
+        st.error(str(e))
+
+# ===============================
+# FOOTER
+# ===============================
+st.markdown("---")
+st.caption("Doppioni disattivati per design: un giocatore può appartenere a una sola squadra.")
