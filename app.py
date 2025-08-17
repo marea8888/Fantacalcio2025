@@ -190,7 +190,11 @@ def quote_rimaste(team: Squadra) -> Dict[str, int]:
     return {r: st.session_state.settings["quote_rosa"][r] - len(team.rosa[r]) for r in RUOLI}
 
 def rosa_completa(team: Squadra) -> bool:
-    return all(len(team.rosa[r]) >= st.session_state.settings["quote_rosa"][r] for r in RUOLI}
+    return all(
+        len(team.rosa[r]) >= st.session_state.settings["quote_rosa"][r]
+        for r in RUOLI
+    )  # <-- chiudi con ")"
+
 
 def crediti_rimasti(team: Squadra) -> int:
     spesi = sum(g.prezzo for r in RUOLI for g in team.rosa[r])
