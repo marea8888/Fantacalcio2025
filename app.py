@@ -516,18 +516,16 @@ with tab_call:
                 # Ordina: primi slot → secondi → ... poi Nome
                 df_out["_slot_num"] = df["_slot_num"].values
                 # Ordina: Slot crescente → Fantamedia desc → Nome
-if fm_c:
-    df_out["_fm"] = pd.to_numeric(df[fm_c], errors='coerce')
-else:
-    df_out["_fm"] = pd.NA
-try:
-    df_out["_fm"] = df_out["_fm"].fillna(float('-inf'))
-except Exception:
-    df_out["_fm"] = -1e18
-# conserva lo slot numerico per l'ordinamento
-df_out["_slot_num"] = df["_slot_num"].values
-# sort finale
-df_out = df_out.sort_values(["_slot_num", "_fm", "Nome"], ascending=[True, False, True], kind="mergesort").drop(columns=["_slot_num", "_fm"])  # mergesort stabile
+                if fm_c:
+                    df_out["_fm"] = pd.to_numeric(df[fm_c], errors='coerce')
+                else:
+                    df_out["_fm"] = pd.NA
+                try:
+                    df_out["_fm"] = df_out["_fm"].fillna(float('-inf'))
+                except Exception:
+                    df_out["_fm"] = -1e18
+                df_out["_slot_num"] = df["_slot_num"].values
+                df_out = df_out.sort_values(["_slot_num", "_fm", "Nome"], ascending=[True, False, True], kind="mergesort").drop(columns=["_slot_num", "_fm"])  # mergesort stabile
 
                 st.caption(f"Trovati {len(df_out)} giocatori per {ruolo_call} con budget {int(budget_call)}")
                 st.dataframe(df_out, use_container_width=True, hide_index=True)
