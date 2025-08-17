@@ -536,7 +536,7 @@ st.caption(f"Impostazioni fissate da codice: {st.session_state.settings['num_squ
 
 # Ordine: Asta come tab predefinito
 tab_asta, tab_call, tab_riepilogo, tab_nomi = st.tabs([
-    "🔨 Asta", "📞 Giocatore a chiamata", "📊 Riepilogo", "✏️ Nomi"
+    "🔨 Asta", "📞 Giocatore a chiamata", "📊 Riepilogo Squadre", "✏️ Nomi Squadre"
 ])
 
 # ===============================
