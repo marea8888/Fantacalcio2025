@@ -580,7 +580,8 @@ with tab_asta:
                 clear_flag_key = f"clear_flag_{ruolo_asta}"
                 # Se ho premuto "Pulisci" nel run precedente, resetta PRIMA di istanziare la text_input
                 if st.session_state.get(clear_flag_key):
-                    st.session_state.pop(search_key, None)
+                    # resetta il campo di ricerca PRIMA di creare la widget
+                    st.session_state[search_key] = ""
                     st.session_state[clear_flag_key] = False
 
                 c_search, c_clear = st.columns([4,1])
