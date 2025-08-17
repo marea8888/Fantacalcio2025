@@ -1,6 +1,7 @@
 import re
 import json
 import unicodedata
+from bs4 import BeautifulSoup
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict
 from pathlib import Path
@@ -450,6 +451,103 @@ def ratio_color_hex(r: float) -> str:
     return f"#{rr:02X}{gg:02X}{bb:02X}"
 
 # ===============================
+# PROBABILI FORMAZIONI – Fantacalcio.it
+# ===============================
+
+def _canon_team_name(s: str) -> str:
+    """Normalizza il nome squadra per il match testuale nell'articolo di Fantacalcio."""
+    x = strip_accents(str(s)).upper().strip()
+    # alias rapidi più comuni
+    alias = {
+        "HELLAS VERONA": "VERONA",
+        "AS ROMA": "ROMA",
+        "AC MILAN": "MILAN",
+        "FC INTER": "INTER",
+        "INTERNAZIONALE": "INTER",
+        "US SASSUOLO": "SASSUOLO",
+        "US LECCE": "LECCE",
+        "EMPOLI FC": "EMPOLI",
+        "GENOA CFC": "GENOA",
+        "UDINESE CALCIO": "UDINESE",
+        "TORINO FC": "TORINO",
+        "ACF FIORENTINA": "FIORENTINA",
+        "SSC NAPOLI": "NAPOLI",
+        "SS LAZIO": "LAZIO",
+        "ATALANTA BC": "ATALANTA",
+        "AC MONZA": "MONZA",
+    }
+    for k, v in alias.items():
+        if x == k or x.startswith(k):
+            return v
+    # “Verona” come fallback per “Hellas Verona”
+    if "VERONA" in x:
+        return "VERONA"
+    return re.sub(r"\s+", " ", x)
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _fc_pick_article_url() -> str:
+    """
+    Trova l'URL dell'articolo riepilogativo 'probabili formazioni' dalla home di Fantacalcio.
+    Fallback: pagina generale probabili formazioni Serie A.
+    """
+    try:
+        r = requests.get("https://www.fantacalcio.it/", timeout=6, headers={"User-Agent": "Mozilla/5.0"})
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "lxml")
+        for a in soup.find_all("a", href=True):
+            txt = (a.get_text(" ", strip=True) or "").lower()
+            href = a["href"]
+            if "probabili formazioni" in txt and "/news/" in href:
+                return href if href.startswith("http") else ("https://www.fantacalcio.it" + href)
+    except Exception:
+        pass
+    return "https://www.fantacalcio.it/probabili-formazioni-serie-a"
+
+@st.cache_data(ttl=900, show_spinner=False)
+def fetch_prob_form_fc(team_name: str) -> dict:
+    """
+    Estrae Modulo / XI / Ballottaggi / Rigoristi / Calci da fermo dall’articolo
+    riepilogativo su Fantacalcio.it (testo libero → parsing robusto).
+    Ritorna dict con eventuali chiavi: modulo, xi, ballottaggi, rigoristi, palle_inattive, source_url.
+    """
+    url = _fc_pick_article_url()
+    try:
+        r = requests.get(url, timeout=8, headers={"User-Agent": "Mozilla/5.0"})
+        r.raise_for_status()
+        # testualizza tutto per un parsing più robusto ai cambi di markup
+        text = BeautifulSoup(r.text, "lxml").get_text("\n", strip=True)
+        T = _canon_team_name(team_name)
+
+        # Prendi il blocco che va dal nome squadra alla successiva intestazione in MAIUSCOLO
+        # (es. "INTER" … fino alla prossima riga in maiuscolo “ROMA/LAZIO/…”)
+        pat = re.compile(rf"\b{re.escape(T)}\b.*?(?:(?=\n[A-ZÀ-Ü][A-ZÀ-Ü\s\-\']{{2,}}\n)|\Z)", re.S)
+        m = pat.search(text)
+        if not m:
+            return {}
+
+        block = m.group(0)
+        info = {"source_url": url}
+
+        m2 = re.search(r"Modulo:\s*([0-9\-]+)", block, re.I)
+        if m2: info["modulo"] = m2.group(1)
+
+        m3 = re.search(r"Probabile formazione.*?:\s*(.+)", block, re.I)
+        if m3: info["xi"] = m3.group(1).strip()
+
+        m4 = re.search(r"Ballottaggi:\s*(.+)", block, re.I)
+        if m4: info["ballottaggi"] = m4.group(1).strip()
+
+        m5 = re.search(r"Rigoristi:\s*(.+)", block, re.I)
+        if m5: info["rigoristi"] = m5.group(1).strip()
+
+        m6 = re.search(r"Calci da fermo:\s*(.+)", block, re.I)
+        if m6: info["palle_inattive"] = m6.group(1).strip()
+
+        return info
+    except Exception:
+        return {}
+
+# ===============================
 # AUTO REFRESH (ogni tot secondi, invisibile)
 # ===============================
 if "settings" in st.session_state:
@@ -774,6 +872,38 @@ with tab_asta:
                             if _valid(fvm_extra):
                                 st.write(f"**FVM**: {fvm_extra}")
 
+                        # --- Probabili formazioni Fantacalcio.it ---
+                        team_col = cols_lower.get('team')
+                        team_name = None
+                        try:
+                            if team_col and team_col in df_view.columns:
+                                val = rec[team_col]
+                                if pd.notna(val) and str(val).strip():
+                                    team_name = str(val).strip()
+                        except Exception:
+                            team_name = None
+                        
+                        if team_name:
+                            with st.expander("📋 Probabili formazioni (Fantacalcio)", expanded=False):
+                                pf = fetch_prob_form_fc(team_name)
+                                if pf:
+                                    if pf.get("modulo"):
+                                        st.write(f"**Modulo**: {pf['modulo']}")
+                                    if pf.get("xi"):
+                                        st.write(f"**XI**: {pf['xi']}")
+                                    if pf.get("ballottaggi"):
+                                        st.caption(f"**Ballottaggi**: {pf['ballottaggi']}")
+                                    if pf.get("rigoristi"):
+                                        st.caption(f"**Rigoristi**: {pf['rigoristi']}")
+                                    if pf.get("palle_inattive"):
+                                        st.caption(f"**Calci da fermo**: {pf['palle_inattive']}")
+                                    if pf.get("source_url"):
+                                        st.markdown(f"[Fonte: Fantacalcio.it]({pf['source_url']})")
+                                else:
+                                    st.caption("Non trovato per questa squadra. Apri la pagina generale:")
+                                    st.markdown("[Probabili formazioni – Fantacalcio.it](https://www.fantacalcio.it/probabili-formazioni-serie-a)")
+                        
+                        
                         st.markdown("---")
                         st.subheader("📝 Assegna a squadra")
                         team_options = list(range(len(st.session_state.squadre)))
