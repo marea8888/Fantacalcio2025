@@ -2,7 +2,6 @@ import json
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict
 from pathlib import Path
-import re
 
 import pandas as pd
 import streamlit as st
@@ -34,6 +33,11 @@ SETTINGS = {
 # Google Drive: file Excel con i fogli P/D/C/A e colonna "name"
 FILE_ID = "1fbDUNKOmuxsJ_BAd7Sgm-V4tO5UkXXLE"
 DRIVE_XLSX_URL = f"https://drive.google.com/uc?export=download&id={FILE_ID}"
+
+# Secondo file (Tutti): extra metrics (Qt.A, FVM)
+FILE2_ID = "1e-0iZhQsavd5_G_KM1ePSXzCJgG0Kn-v"
+DRIVE2_XLSX_URL = f"https://drive.google.com/uc?export=download&id={FILE2_ID}"
+SHEET2_NAME = "Tutti"
 
 # Campi da visualizzare nella card giocatore (case-insensitive)
 FIELD_LABELS = {
@@ -70,7 +74,7 @@ class Squadra:
 
     @staticmethod
     def from_dict(d: dict) -> "Squadra":
-        s = Squadra(d["nome"], d["budget"]) 
+        s = Squadra(d["nome"], d["budget"])
         s.rosa = {r: [Giocatore(**g) for g in d.get("rosa", {}).get(r, [])] for r in RUOLI}
         return s
 
@@ -293,6 +297,68 @@ def get_slot_for(nome: str, ruolo: str):
         return None
 
 # ===============================
+# DATI EXTRA (file 'Tutti'): Qt.A, FVM
+# ===============================
+@st.cache_data(show_spinner=False)
+def load_all_extra_df() -> pd.DataFrame:
+    try:
+        df = pd.read_excel(DRIVE2_XLSX_URL, sheet_name=SHEET2_NAME)
+        return df
+    except ImportError:
+        raise RuntimeError("Per leggere file Excel è necessario installare 'openpyxl' (pip install openpyxl)")
+    except Exception as e:
+        raise RuntimeError(f"Errore lettura file Drive (Tutti): {e}")
+
+@st.cache_data(show_spinner=False)
+def build_extra_lookup() -> Dict[str, Dict[str, object]]:
+    """Crea lookup (ruolo|NOME) → { 'Qt.A':..., 'FVM':... } dal foglio 'Tutti'."""
+    mapping: Dict[str, Dict[str, object]] = {}
+    try:
+        df = load_all_extra_df()
+        if df is None or df.empty:
+            return mapping
+        cols_lower = {str(c).strip().lower(): c for c in df.columns}
+        name_col = cols_lower.get('nome') or cols_lower.get('name')
+        # Colonna ruolo: specificato che è la colonna R (indice 17, zero-based)
+        try:
+            ruolo_series = df.iloc[:, 17]
+        except Exception:
+            ruolo_series = None
+        # Colonne possibili per Qt.A e FVM
+        qt_col = None
+        for k in ('qt.a', 'qt_a', 'qta'):
+            if k in cols_lower:
+                qt_col = cols_lower[k]; break
+        fvm_col = cols_lower.get('fvm')
+        if not name_col or ruolo_series is None:
+            return mapping
+        for i, row in df.iterrows():
+            try:
+                nome = str(row[name_col]).strip()
+                if not nome:
+                    continue
+                ruolo_val = str(ruolo_series.iloc[i]).strip().upper() if ruolo_series is not None else ''
+                ruolo = ruolo_val[:1]
+                if ruolo not in RUOLI:
+                    continue
+                qt_val = row[qt_col] if qt_col else None
+                fvm_val = row[fvm_col] if fvm_col else None
+                key = f"{ruolo}|{nome.upper()}"
+                mapping[key] = {"Qt.A": qt_val, "FVM": fvm_val}
+            except Exception:
+                continue
+        return mapping
+    except Exception:
+        return mapping
+
+
+def get_all_metrics(ruolo: str, nome: str) -> Dict[str, object]:
+    try:
+        return build_extra_lookup().get(f"{ruolo}|{str(nome).strip().upper()}", {})
+    except Exception:
+        return {}
+
+# ===============================
 # COLORI % TARGET (barre verdi→rosse)
 # ===============================
 
@@ -400,7 +466,10 @@ with st.sidebar:
 st.title("Fantacalcio – Gestore Lega")
 st.caption(f"Impostazioni fissate da codice: {st.session_state.settings['num_squadre']} squadre, {st.session_state.settings['crediti']} crediti, rosa 3P/8D/8C/6A, doppioni NON consentiti.")
 
-tab_asta, tab_call, tab_riepilogo, tab_acquisti, tab_nomi = st.tabs(["🔨 Asta", "📞 Giocatore a chiamata", "📊 Riepilogo", "🛒 Acquisti", "✏️ Nomi"])
+# Ordine: Asta come tab predefinito
+tab_asta, tab_call, tab_riepilogo, tab_acquisti, tab_nomi = st.tabs([
+    "🔨 Asta", "📞 Giocatore a chiamata", "📊 Riepilogo", "🛒 Acquisti", "✏️ Nomi"
+])
 
 # ===============================
 # TAB: RIEPILOGO (tutte le squadre)
@@ -484,12 +553,11 @@ with tab_call:
             if not range_c:
                 st.warning("Nel file non è presente la colonna 'pfcRange' per stimare il prezzo.")
             else:
-                # Calcola low/high e filtra in base al budget_call
+                # Calcola low/high e filtra: MOSTRA chi ha max range >= budget inserito
                 lows, highs, keeps = [], [], []
                 for v in df[range_c].fillna(""):
                     lo, hi = parse_pfcrange_cell(v)
-                    lows.append(lo)
-                    highs.append(hi)
+                    lows.append(lo); highs.append(hi)
                 for lo, hi in zip(lows, highs):
                     if hi is None:
                         keeps.append(False)
@@ -513,8 +581,6 @@ with tab_call:
                 if fm_c: out_cols["Fantamedia Stimata"] = df[fm_c]
                 df_out = pd.DataFrame(out_cols)
 
-                # Ordina: primi slot → secondi → ... poi Nome
-                df_out["_slot_num"] = df["_slot_num"].values
                 # Ordina: Slot crescente → Fantamedia desc → Nome
                 if fm_c:
                     df_out["_fm"] = pd.to_numeric(df[fm_c], errors='coerce')
@@ -534,7 +600,6 @@ with tab_call:
 
 # ===============================
 # TAB: ASTA – RUOLO & LETTERA + CARD GIOCATORE
-# =============================== – RUOLO & LETTERA + CARD GIOCATORE
 # ===============================
 with tab_asta:
     col_a, col_b = st.columns([1,1])
@@ -580,7 +645,6 @@ with tab_asta:
                 clear_flag_key = f"clear_flag_{ruolo_asta}"
                 # Se ho premuto "Pulisci" nel run precedente, resetta PRIMA di istanziare la text_input
                 if st.session_state.get(clear_flag_key):
-                    # resetta il campo di ricerca PRIMA di creare la widget
                     st.session_state[search_key] = ""
                     st.session_state[clear_flag_key] = False
 
@@ -660,6 +724,19 @@ with tab_asta:
                             if pd.isna(val) or str(val).strip() == "":
                                 continue
                             st.write(f"**{label}**: {val}")
+
+                        # Dati extra dal file "Tutti" (Qt.A, FVM)
+                        extras = get_all_metrics(ruolo_asta, rec[NAME_COL])
+                        qt_extra = extras.get("Qt.A") if extras else None
+                        fvm_extra = extras.get("FVM") if extras else None
+                        def _valid(v):
+                            s = str(v)
+                            return not (s.strip()=="" or s.lower()=="nan")
+                        if _valid(qt_extra) or _valid(fvm_extra):
+                            if _valid(qt_extra):
+                                st.write(f"**Qt.A**: {qt_extra}")
+                            if _valid(fvm_extra):
+                                st.write(f"**FVM**: {fvm_extra}")
 
                         st.markdown("---")
                         st.subheader("📝 Assegna a squadra")
