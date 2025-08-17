@@ -432,7 +432,7 @@ def apply_auto_refresh():
         st_autorefresh(interval=interval_ms, key="auto_refresh")
     except Exception:
         st.markdown(
-            f"<script>setTimeout(function(){window.location.reload();}, {interval_ms});</script>",
+            f"<script>setTimeout(function(){{window.location.reload();}}, {interval_ms});</script>",
             unsafe_allow_html=True,
         )
 
