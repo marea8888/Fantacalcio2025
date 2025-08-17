@@ -434,7 +434,7 @@ with st.sidebar:
         st.metric("Crediti rimasti", crediti_rimasti(my_team))
         st.markdown("---")
         spent_map = spesa_per_ruolo(my_team)
-        targ_map = target_per_ruolo(my_team)
+        targ_map = target_per_ruolo_dynamic(my_team)
         for r, label in [("P","Portieri"),("D","Difensori"),("C","Centrocampisti"),("A","Attaccanti")]:
             count = len(my_team.rosa[r])
             quota = st.session_state.settings['quote_rosa'][r]
@@ -790,7 +790,7 @@ with tab_asta:
                         if sel_team_idx == st.session_state.get("user_team_idx", -1):
                             team_sel = st.session_state.squadre[sel_team_idx]
                             curr = spesa_per_ruolo(team_sel).get(ruolo_asta, 0)
-                            targ = target_per_ruolo(team_sel).get(ruolo_asta, 0)
+                            targ = target_per_ruolo_dynamic(team_sel).get(ruolo_asta, 0)
                             projected = curr + int(prezzo_sel)
                             label_ruolo = ROLE_LABELS.get(ruolo_asta, ruolo_asta)
                             if targ > 0:
@@ -890,3 +890,62 @@ with tab_asta:
 # ===============================
 st.markdown("---")
 st.caption("Doppioni disattivati per design: un giocatore può appartenere a una sola squadra.")
+
+def target_per_ruolo_dynamic(team: Squadra) -> Dict[str, int]:
+    """
+    Ricalcola i target per reparto quando uno o più reparti sono COMPLETI.
+    - I reparti COMPLETI vengono 'bloccati' al valore realmente speso.
+    - Il budget residuo viene redistribuito tra i reparti NON completi
+      PROPORZIONALMENTE alle percentuali originali (normalize).
+    - Se nessun reparto è completo, ritorna i target fissi originali.
+    """
+    perc = st.session_state.settings.get("spending_targets", {"P": 0.10, "D": 0.20, "C": 0.30, "A": 0.40})
+    spent = spesa_per_ruolo(team)
+    quota = st.session_state.settings["quote_rosa"]
+    completed = [r for r in RUOLI if len(team.rosa[r]) >= quota[r]]
+    if not completed:
+        return target_per_ruolo(team)
+
+    t: Dict[str, int] = {}
+    # Blocco i reparti completi al valore speso
+    for r in completed:
+        t[r] = int(spent.get(r, 0))
+
+    # Budget rimanente da distribuire agli altri reparti
+    remaining_roles = [r for r in RUOLI if r not in completed]
+    if not remaining_roles:
+        # Tutti completi: i target sono i totali spesi
+        return t
+
+    remaining_pool = int(team.budget - sum(t.values()))
+    if remaining_pool < 0:
+        remaining_pool = 0
+
+    # Normalizzo i pesi dei reparti rimanenti secondo le percentuali originali
+    total_w = sum(perc.get(r, 0.0) for r in remaining_roles)
+    # Se somma 0 (edge case), distribuisco equamente
+    if total_w <= 0:
+        weights = {r: 1.0/len(remaining_roles) for r in remaining_roles}
+    else:
+        weights = {r: (perc.get(r, 0.0)/total_w) for r in remaining_roles}
+
+    # Assegna target ai reparti rimanenti
+    acc = 0
+    for i, r in enumerate(remaining_roles):
+        if i < len(remaining_roles)-1:
+            val = int(round(remaining_pool * weights[r]))
+            t[r] = val
+            acc += val
+        else:
+            # Ultimo reparto: aggiusta eventuale differenza per arrivare esattamente al budget
+            t[r] = int(remaining_pool - acc)
+
+    # Sanity: assicurati che la somma sia il budget totale (entro ±1 per arrotondamenti)
+    diff = int(team.budget - sum(t.values()))
+    if diff != 0:
+        # Correggi sul primo reparto non completo
+        for r in remaining_roles:
+            t[r] = max(0, t[r] + diff)
+            break
+    return t
+
