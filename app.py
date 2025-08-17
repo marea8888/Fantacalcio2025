@@ -355,7 +355,7 @@ def build_extra_indices() -> Tuple[Dict[str, Dict[str, object]], Dict[str, List[
         colmap = {canon_colname(c): c for c in df.columns}
         name_col = colmap.get('nome') or colmap.get('name')
         # Ruolo: prova colonne con nome "ruolo/role", altrimenti fallback a colonna R (index 17)
-        ruolo_col = colmap.get('ruolo') or colmap.get('role')
+        ruolo_col = colmap.get('R') or colmap.get('R')
         ruolo_series = None
         if ruolo_col:
             ruolo_series = df[ruolo_col]
