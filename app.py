@@ -55,14 +55,12 @@ ROLE_LABELS = {"P": "Porta", "D": "Difesa", "C": "Centrocampo", "A": "Attacco"}
 # ===============================
 # UTILS DI NORMALIZZAZIONE
 # ===============================
-
 def strip_accents(s: str) -> str:
     try:
         s = unicodedata.normalize("NFKD", str(s))
         return s.encode("ascii", "ignore").decode("ascii")
     except Exception:
         return str(s)
-
 
 def norm_name(s: str) -> str:
     """Normalizza un nome: rimuove accenti, punteggiatura, spazi multipli, lowercase.
@@ -72,7 +70,6 @@ def norm_name(s: str) -> str:
     s = re.sub(r"[^a-z0-9]+", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
     return s
-
 
 def name_key(s: str) -> str:
     """Chiave robusta per confrontare i nomi tra file 1 e file 2.
@@ -87,7 +84,6 @@ def name_key(s: str) -> str:
         s = str(s)
     s = s.lower()
     return "".join(ch for ch in s if ch.isalnum())
-
 
 def canon_colname(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", str(s).lower())
@@ -190,32 +186,25 @@ if "_boot" not in st.session_state:
 # ===============================
 # FUNZIONI LEGA
 # ===============================
-
 def quote_rimaste(team: Squadra) -> Dict[str, int]:
     return {r: st.session_state.settings["quote_rosa"][r] - len(team.rosa[r]) for r in RUOLI}
 
-
 def rosa_completa(team: Squadra) -> bool:
     return all(len(team.rosa[r]) >= st.session_state.settings["quote_rosa"][r] for r in RUOLI)
-
 
 def crediti_rimasti(team: Squadra) -> int:
     spesi = sum(g.prezzo for r in RUOLI for g in team.rosa[r])
     return team.budget - spesi
 
-
 def elenco_giocatori_global() -> List[str]:
     return [g.nome for team in st.session_state.squadre for r in RUOLI for g in team.rosa[r]]
-
 
 def spesa_per_ruolo(team: Squadra) -> Dict[str, int]:
     return {r: sum(g.prezzo for g in team.rosa[r]) for r in RUOLI}
 
-
 def target_per_ruolo(team: Squadra) -> Dict[str, int]:
     perc = st.session_state.settings.get("spending_targets", {"P": 0.10, "D": 0.20, "C": 0.30, "A": 0.40})
     return {r: int(round(team.budget * perc.get(r, 0))) for r in RUOLI}
-
 
 def aggiungi_giocatore(team: Squadra, nome: str, ruolo: str, prezzo: int) -> bool:
     if not nome.strip() or ruolo not in RUOLI or prezzo < 0:
@@ -235,7 +224,6 @@ def aggiungi_giocatore(team: Squadra, nome: str, ruolo: str, prezzo: int) -> boo
     })
     save_state()
     return True
-
 
 def rimuovi_giocatore(team: Squadra, ruolo: str, giocatore_nome: str) -> bool:
     elenco = team.rosa[ruolo]
@@ -325,7 +313,6 @@ def build_slot_lookup() -> Dict[str, str]:
             continue
     return mapping
 
-
 def get_slot_for(nome: str, ruolo: str):
     try:
         return build_slot_lookup().get(f"{ruolo}|{norm_name(nome)}")
@@ -384,7 +371,6 @@ def build_extra_index() -> Dict[str, Dict[str, object]]:
     except Exception:
         return mapping
 
-
 def get_all_metrics(ruolo: str, nome: str) -> Dict[str, object]:
     try:
         idx = build_extra_index()
@@ -396,14 +382,11 @@ def get_all_metrics(ruolo: str, nome: str) -> Dict[str, object]:
 # ===============================
 # COLORI % TARGET (barre verdi→rosse)
 # ===============================
-
 def _clamp01(x: float) -> float:
     return max(0.0, min(1.0, float(x)))
 
-
 def _lerp(a: int, b: int, t: float) -> int:
     return int(round(a + (b - a) * t))
-
 
 def ratio_color_hex(r: float) -> str:
     r = _clamp01(r)
@@ -420,7 +403,6 @@ def ratio_color_hex(r: float) -> str:
 if "settings" in st.session_state:
     st.session_state.settings.setdefault("auto_refresh_enabled", True)
     st.session_state.settings.setdefault("auto_refresh_ms", 5000)
-
 
 def apply_auto_refresh():
     enabled = st.session_state.settings.get("auto_refresh_enabled", True)
@@ -612,8 +594,10 @@ with tab_call:
                 df["_slot_num"] = pd.NA
             df["_slot_num"] = df["_slot_num"].fillna(9999)
 
+            # Ordina: Slot ↑, poi Qt.A ↓, poi FVM ↓, quindi Nome ↑
+            df["_QtA_sort"] = pd.to_numeric(df["_QtA"], errors='coerce').fillna(float('-inf'))
             df["_FVM_sort"] = pd.to_numeric(df["_FVM"], errors='coerce').fillna(float('-inf'))
-            df = df.sort_values(["_slot_num", "_FVM_sort", NAME_COL], ascending=[True, False, True], kind="mergesort")
+            df = df.sort_values(["_slot_num", "_QtA_sort", "_FVM_sort", NAME_COL], ascending=[True, False, False, True], kind="mergesort")
 
             # Output columns
             out_cols = {}
