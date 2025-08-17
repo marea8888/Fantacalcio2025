@@ -471,6 +471,40 @@ with tab_asta:
                 if NAME_COL in df_view.columns:
                     df_view = df_view[~df_view[NAME_COL].map(_norm).isin(taken)].reset_index(drop=True)
 
+                # 🔎 Cerca nella lista filtrata (nome/squadra/slot)
+                c_search, c_clear = st.columns([4,1])
+                with c_search:
+                    search_key = f"search_{ruolo_asta}"
+                    search_q = st.text_input(
+                        "🔎 Cerca",
+                        value=st.session_state.get(search_key, ""),
+                        placeholder="Cerca per nome, squadra o slot…",
+                        key=search_key,
+                    )
+                with c_clear:
+                    if st.button("Pulisci", key=f"clear_{ruolo_asta}"):
+                        st.session_state[search_key] = ""
+                        try:
+                            st.rerun()
+                        except Exception:
+                            st.experimental_rerun()
+
+                if search_q:
+                    cols_l = {c.lower(): c for c in df_view.columns}
+                    name_c = NAME_COL
+                    team_c = cols_l.get('team')
+                    slot_c = cols_l.get('slot')
+                    q = search_q.strip().lower()
+                    def _cont(v):
+                        return q in str(v).lower()
+                    mask = df_view[name_c].apply(_cont)
+                    if team_c:
+                        mask = mask | df_view[team_c].apply(_cont)
+                    if slot_c:
+                        mask = mask | df_view[slot_c].apply(_cont)
+                    df_view = df_view[mask].reset_index(drop=True)
+                st.caption(f"Trovati {len(df_view)} calciatori")
+
                 key_idx = f"car_idx_{ruolo_asta}"
                 if key_idx not in st.session_state:
                     st.session_state[key_idx] = 0
