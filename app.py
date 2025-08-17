@@ -472,29 +472,36 @@ with tab_asta:
                     df_view = df_view[~df_view[NAME_COL].map(_norm).isin(taken)].reset_index(drop=True)
 
                 # 🔎 Cerca nella lista filtrata (nome/squadra/slot)
+                search_key = f"search_{ruolo_asta}"
+                clear_flag_key = f"clear_flag_{ruolo_asta}"
+                # Se ho premuto "Pulisci" nel run precedente, resetta PRIMA di istanziare la text_input
+                if st.session_state.get(clear_flag_key):
+                    st.session_state.pop(search_key, None)
+                    st.session_state[clear_flag_key] = False
+
                 c_search, c_clear = st.columns([4,1])
                 with c_search:
-                    search_key = f"search_{ruolo_asta}"
                     search_q = st.text_input(
                         "🔎 Cerca",
-                        value=st.session_state.get(search_key, ""),
                         placeholder="Cerca per nome, squadra o slot…",
                         key=search_key,
                     )
                 with c_clear:
                     if st.button("Pulisci", key=f"clear_{ruolo_asta}"):
-                        st.session_state[search_key] = ""
+                        st.session_state[clear_flag_key] = True
                         try:
                             st.rerun()
                         except Exception:
                             st.experimental_rerun()
 
-                if search_q:
+                # Applica filtro se presente
+                search_q_val = st.session_state.get(search_key, "")
+                if search_q_val:
                     cols_l = {c.lower(): c for c in df_view.columns}
                     name_c = NAME_COL
                     team_c = cols_l.get('team')
                     slot_c = cols_l.get('slot')
-                    q = search_q.strip().lower()
+                    q = search_q_val.strip().lower()
                     def _cont(v):
                         return q in str(v).lower()
                     mask = df_view[name_c].apply(_cont)
