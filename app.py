@@ -190,7 +190,7 @@ def quote_rimaste(team: Squadra) -> Dict[str, int]:
     return {r: st.session_state.settings["quote_rosa"][r] - len(team.rosa[r]) for r in RUOLI}
 
 def rosa_completa(team: Squadra) -> bool:
-    return all(len(team.rosa[r]) >= st.session_state.settings["quote_rosa"][r] for r in RUOLI)
+    return all(len(team.rosa[r]) >= st.session_state.settings["quote_rosa"][r] for r in RUOLI}
 
 def crediti_rimasti(team: Squadra) -> int:
     spesi = sum(g.prezzo for r in RUOLI for g in team.rosa[r])
@@ -541,10 +541,20 @@ tab_asta, tab_call, tab_riepilogo, tab_acquisti, tab_nomi = st.tabs([
 with tab_riepilogo:
     for team in st.session_state.squadre:
         with st.expander(f"{team.nome} – Crediti rimasti: {crediti_rimasti(team)}", expanded=False):
-            st.write("Portieri:", [g.nome for g in team.rosa["P"]])
-            st.write("Difensori:", [g.nome for g in team.rosa["D"]])
-            st.write("Centrocampisti:", [g.nome for g in team.rosa["C"]])
-            st.write("Attaccanti:", [g.nome for g in team.rosa["A"]])
+            # Lista con Slot e prezzo per ogni reparto
+            for r, label in [("P","Portieri"),("D","Difensori"),("C","Centrocampisti"),("A","Attaccanti")]:
+                items = []
+                for g in team.rosa[r]:
+                    _slot = get_slot_for(g.nome, r)
+                    if _slot:
+                        items.append(f"{g.nome} — Slot {_slot} ({g.prezzo})")
+                    else:
+                        items.append(f"{g.nome} ({g.prezzo})")
+                if items:
+                    st.markdown(f"**{label}**")
+                    st.markdown("\n".join(f"- {x}" for x in items))
+                else:
+                    st.markdown(f"**{label}**: _nessuno_")
 
 # ===============================
 # TAB: ACQUISTI MANUALI
