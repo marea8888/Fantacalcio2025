@@ -1,6 +1,8 @@
+import re
 import json
+import unicodedata
 from dataclasses import dataclass, field, asdict
-from typing import List, Dict
+from typing import List, Dict, Tuple
 from pathlib import Path
 
 import pandas as pd
@@ -49,6 +51,32 @@ FIELD_LABELS = {
 }
 NAME_COL = "name"  # colonna con il nome del calciatore
 ROLE_LABELS = {"P": "Porta", "D": "Difesa", "C": "Centrocampo", "A": "Attacco"}
+
+# ===============================
+# UTILS DI NORMALIZZAZIONE (nomi e colonne)
+# ===============================
+
+def strip_accents(s: str) -> str:
+    try:
+        s = unicodedata.normalize("NFKD", str(s))
+        return s.encode("ascii", "ignore").decode("ascii")
+    except Exception:
+        return str(s)
+
+
+def norm_name(s: str) -> str:
+    """Normalizza un nome: rimuove accenti, punteggiatura, spazi multipli, lowercase.
+    Utile per match tra file con NAME in maiuscolo/minuscolo o con accenti.
+    """
+    s = strip_accents(s).lower()
+    s = re.sub(r"[^a-z0-9]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def canon_colname(s: str) -> str:
+    """Canonicalizza il nome colonna per ricerche fuzzy (rimuove non-alnum, lowercase)."""
+    return re.sub(r"[^a-z0-9]", "", str(s).lower())
 
 # ===============================
 # DATA MODEL
@@ -211,7 +239,7 @@ def rimuovi_giocatore(team: Squadra, ruolo: str, giocatore_nome: str) -> bool:
     return False
 
 # ===============================
-# FUNZIONI DATI GDRIVE
+# FUNZIONI DATI GDRIVE (file ruolo P/D/C/A)
 # ===============================
 @st.cache_data(show_spinner=False)
 def load_sheet_from_drive(sheet_name: str) -> pd.DataFrame:
@@ -264,11 +292,12 @@ def parse_pfcrange_cell(val):
         return (None, None)
 
 # ===============================
-# LOOKUP SLOT PER GIOCATORE (da fogli Excel)
+# LOOKUP SLOT PER GIOCATORE (da fogli Excel ruolo)
 # ===============================
 @st.cache_data(show_spinner=False)
 def build_slot_lookup() -> Dict[str, str]:
-    mapping = {}
+    """Ritorna mapping "RUOLO|nome_norm" → Slot (come string)."""
+    mapping: Dict[str, str] = {}
     for sheet in RUOLI:
         try:
             df = load_sheet_from_drive(sheet)
@@ -280,7 +309,7 @@ def build_slot_lookup() -> Dict[str, str]:
             if not name_col or not slot_col:
                 continue
             for _, row in df[[name_col, slot_col]].dropna(subset=[name_col]).iterrows():
-                name_str = str(row[name_col]).strip().upper()
+                name_str = norm_name(row[name_col])
                 slot_val = row[slot_col]
                 if pd.isna(slot_val) or str(slot_val).strip() == "":
                     continue
@@ -292,7 +321,7 @@ def build_slot_lookup() -> Dict[str, str]:
 
 def get_slot_for(nome: str, ruolo: str):
     try:
-        return build_slot_lookup().get(f"{ruolo}|{str(nome).strip().upper()}")
+        return build_slot_lookup().get(f"{ruolo}|{norm_name(nome)}")
     except Exception:
         return None
 
@@ -310,51 +339,95 @@ def load_all_extra_df() -> pd.DataFrame:
         raise RuntimeError(f"Errore lettura file Drive (Tutti): {e}")
 
 @st.cache_data(show_spinner=False)
-def build_extra_lookup() -> Dict[str, Dict[str, object]]:
-    """Crea lookup (ruolo|NOME) → { 'Qt.A':..., 'FVM':... } dal foglio 'Tutti'."""
-    mapping: Dict[str, Dict[str, object]] = {}
+def build_extra_indices() -> Tuple[Dict[str, Dict[str, object]], Dict[str, List[Tuple[str, Dict[str, object]]]]]:
+    """Costruisce due indici:
+    - by_role_name: key "RUOLO|nome_norm" → {Qt.A, FVM}
+    - by_name: key "nome_norm" → lista di tuple (ruolo, {Qt.A, FVM}) per fallback se non matcha il ruolo
+    """
+    by_role_name: Dict[str, Dict[str, object]] = {}
+    by_name: Dict[str, List[Tuple[str, Dict[str, object]]]] = {}
     try:
         df = load_all_extra_df()
         if df is None or df.empty:
-            return mapping
-        cols_lower = {str(c).strip().lower(): c for c in df.columns}
-        name_col = cols_lower.get('nome') or cols_lower.get('name')
-        # Colonna ruolo: specificato che è la colonna R (indice 17, zero-based)
-        try:
+            return by_role_name, by_name
+
+        # Canonicalizza colonne
+        colmap = {canon_colname(c): c for c in df.columns}
+        name_col = colmap.get('nome') or colmap.get('name')
+        # Ruolo: prova colonne con nome "ruolo/role", altrimenti fallback a colonna R (index 17)
+        ruolo_col = colmap.get('ruolo') or colmap.get('role')
+        ruolo_series = None
+        if ruolo_col:
+            ruolo_series = df[ruolo_col]
+        elif df.shape[1] > 17:
             ruolo_series = df.iloc[:, 17]
-        except Exception:
-            ruolo_series = None
-        # Colonne possibili per Qt.A e FVM
-        qt_col = None
-        for k in ('qt.a', 'qt_a', 'qta'):
-            if k in cols_lower:
-                qt_col = cols_lower[k]; break
-        fvm_col = cols_lower.get('fvm')
+        # Qt.A & FVM: cerca in maniera robusta
+        qta_col = None
+        for key in colmap:
+            if re.fullmatch(r"qt\.?a", key) or key in ("qta", "qta_", "qta0", "qta1"):
+                qta_col = colmap[key]
+                break
+        if not qta_col:
+            # prova a trovare una colonna che contiene "qta"
+            for key in colmap:
+                if "qta" in key:
+                    qta_col = colmap[key]; break
+        fvm_col = None
+        for key in colmap:
+            if key == 'fvm' or key.endswith('fvm'):
+                fvm_col = colmap[key]
+                break
+
         if not name_col or ruolo_series is None:
-            return mapping
+            return by_role_name, by_name
+
         for i, row in df.iterrows():
             try:
-                nome = str(row[name_col]).strip()
-                if not nome:
+                nome_raw = str(row[name_col]).strip()
+                if not nome_raw:
                     continue
+                nome_n = norm_name(nome_raw)
+
                 ruolo_val = str(ruolo_series.iloc[i]).strip().upper() if ruolo_series is not None else ''
-                ruolo = ruolo_val[:1]
+                ruolo = ruolo_val[:1] if ruolo_val else ''
                 if ruolo not in RUOLI:
-                    continue
-                qt_val = row[qt_col] if qt_col else None
-                fvm_val = row[fvm_col] if fvm_col else None
-                key = f"{ruolo}|{nome.upper()}"
-                mapping[key] = {"Qt.A": qt_val, "FVM": fvm_val}
+                    # prova a dedurre dalla parola intera
+                    if ruolo_val.startswith("P"):
+                        ruolo = "P"
+                    elif ruolo_val.startswith("D"):
+                        ruolo = "D"
+                    elif ruolo_val.startswith("C"):
+                        ruolo = "C"
+                    elif ruolo_val.startswith("A"):
+                        ruolo = "A"
+                    else:
+                        continue
+
+                qta_val = row[qta_col] if qta_col in df.columns else None
+                fvm_val = row[fvm_col] if fvm_col in df.columns else None
+                metrics = {"Qt.A": qta_val, "FVM": fvm_val}
+
+                by_role_name[f"{ruolo}|{nome_n}"] = metrics
+                by_name.setdefault(nome_n, []).append((ruolo, metrics))
             except Exception:
                 continue
-        return mapping
+        return by_role_name, by_name
     except Exception:
-        return mapping
+        return by_role_name, by_name
 
 
 def get_all_metrics(ruolo: str, nome: str) -> Dict[str, object]:
     try:
-        return build_extra_lookup().get(f"{ruolo}|{str(nome).strip().upper()}", {})
+        by_role_name, by_name = build_extra_indices()
+        key = f"{ruolo}|{norm_name(nome)}"
+        if key in by_role_name:
+            return by_role_name[key]
+        # Fallback: unico match per nome a prescindere dal ruolo
+        lst = by_name.get(norm_name(nome), [])
+        if len(lst) == 1:
+            return lst[0][1]
+        # Altrimenti nessun dato
+        return {}
     except Exception:
         return {}
 
@@ -725,7 +798,7 @@ with tab_asta:
                                 continue
                             st.write(f"**{label}**: {val}")
 
-                        # Dati extra dal file "Tutti" (Qt.A, FVM)
+                        # Dati extra dal file "Tutti" (Qt.A, FVM) con match robusto su nome/ruolo
                         extras = get_all_metrics(ruolo_asta, rec[NAME_COL])
                         qt_extra = extras.get("Qt.A") if extras else None
                         fvm_extra = extras.get("FVM") if extras else None
