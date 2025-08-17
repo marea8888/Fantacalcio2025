@@ -873,7 +873,7 @@ with tab_asta:
                                 st.write(f"**FVM**: {fvm_extra}")
 
                         # --- Probabili formazioni Fantacalcio.it ---
-                        team_col = cols_lower.get('Squadra')
+                        team_col = cols_lower.get('team')
                         team_name = None
                         try:
                             if team_col and team_col in df_view.columns:
