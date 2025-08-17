@@ -247,47 +247,24 @@ def build_slot_lookup() -> Dict[str, str]:
             cols_lower = {c.lower(): c for c in df.columns}
             name_col = cols_lower.get('name')
             slot_col = cols_lower.get('slot')
-                            if slot_col and slot_col in df_view.columns:
-                                ser = df_view[slot_col].dropna().astype(str).str.strip()
-                                if len(ser) == 0:
-                                    st.write("_Nessun dato disponibile_")
-                                else:
-                                    # Mappa nomi disponibili per slot (dal dataset filtrato)
-                                    df_slots = df_view[[slot_col, NAME_COL]].dropna(subset=[slot_col, NAME_COL]).copy()
-                                    df_slots[slot_col] = df_slots[slot_col].astype(str).str.strip()
-                                    names_by_slot = {}
-                                    for sl, sub in df_slots.groupby(slot_col):
-                                        names_by_slot[str(sl)] = list(sub[NAME_COL].astype(str))
+            if not name_col or not slot_col:
+                continue
+            for _, row in df[[name_col, slot_col]].dropna(subset=[name_col]).iterrows():
+                name_str = str(row[name_col]).strip().upper()
+                slot_val = row[slot_col]
+                if pd.isna(slot_val) or str(slot_val).strip() == "":
+                    continue
+                mapping[f"{sheet}|{name_str}"] = str(slot_val)
+        except Exception:
+            continue
+    return mapping
 
-                                    order = pd.DataFrame({'slot': ser}).drop_duplicates()
-                                    order['slot_num'] = pd.to_numeric(order['slot'], errors='coerce')
-                                    order = order.sort_values(['slot_num','slot'], na_position='last')
-                                    counts = ser.value_counts()
 
-                                    # CSS tooltip (mostra lista su hover)
-                                    st.markdown("""
-                                    <style>
-                                    .tooltip-row{position:relative;padding:4px 2px;}
-                                    .tooltip-row .hint{cursor:default;}
-                                    .tooltip-row .tip{visibility:hidden;opacity:0;transition:opacity .15s ease;position:absolute;left:0;top:100%;background:#111;color:#fff;padding:8px 10px;border-radius:8px;z-index:1000;min-width:220px;max-width:420px;box-shadow:0 4px 12px rgba(0,0,0,.2);} 
-                                    .tooltip-row:hover .tip{visibility:visible;opacity:1;} 
-                                    .tooltip-row .tip ul{margin:6px 0 0 18px;padding:0;max-height:260px;overflow:auto;} 
-                                    </style>
-                                    """, unsafe_allow_html=True)
-
-                                    for val in order['slot']:
-                                        cnt = int(counts.get(val, 0))
-                                        names = names_by_slot.get(str(val), [])
-                                        if names:
-                                            item_list = ''.join(f'<li>{n}</li>' for n in names)
-                                            html = f"<div class='tooltip-row'><span class='hint'>• Slot {val}: {cnt} disponibili</span><div class='tip'><strong>Giocatori disponibili (Slot {val})</strong><ul>{item_list}</ul></div></div>"
-                                        else:
-                                            html = f"<div class='tooltip-row'><span class='hint'>• Slot {val}: {cnt} disponibili</span></div>"
-                                        st.markdown(html, unsafe_allow_html=True)
-                            else:
-                                st.caption("Colonna 'Slot' assente nel file.")
-    except Exception as e:
-        st.error(str(e))
+def get_slot_for(nome: str, ruolo: str):
+    try:
+        return build_slot_lookup().get(f"{ruolo}|{str(nome).strip().upper()}")
+    except Exception:
+        return None
 
 # ===============================
 # FOOTER
