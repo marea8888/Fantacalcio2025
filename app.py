@@ -1,6 +1,7 @@
 import re
 import json
 import unicodedata
+import io
 from bs4 import BeautifulSoup
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict
@@ -424,6 +425,61 @@ def build_extra_index() -> Dict[str, Dict[str, object]]:
     except Exception:
         return mapping
 
+@st.cache_data(show_spinner=False)
+def build_id_index() -> Dict[str, int]:
+    """
+    Crea mapping dal file 2 (sheet 'Tutti') usando ESATTAMENTE:
+    - Ruolo: colonna 'R' (prima lettera P/D/C/A)
+    - Nome : colonna 'Nome'
+    - Id   : colonna 'Id'
+    Chiave: 'R|name_key(Nome)' -> Id (int)
+    """
+    out: Dict[str, int] = {}
+    try:
+        df = load_all_extra_df()
+        if df is None or df.empty:
+            return out
+
+        # Trova colonne (case-insensitive sui nomi esatti)
+        def find_col(targets):
+            tset = {str(t).strip().lower() for t in targets}
+            for c in df.columns:
+                if str(c).strip().lower() in tset:
+                    return c
+            return None
+
+        col_nome = find_col(["Nome"]) or find_col(["name"])
+        col_ruolo = find_col(["R"])
+        col_id    = find_col(["Id", "ID", "id"])
+        if not (col_nome and col_ruolo and col_id):
+            return out
+
+        name_keys = df[col_nome].astype(str).map(name_key)
+        role_first = df[col_ruolo].astype(str).str.strip().str.upper().str[:1]
+        ids = pd.to_numeric(df[col_id], errors="coerce").astype("Int64")
+
+        for i in range(len(df)):
+            r = role_first.iloc[i]
+            if r not in RUOLI:
+                continue
+            pid = ids.iloc[i]
+            if pd.isna(pid):
+                continue
+            key = f"{r}|{name_keys.iloc[i]}"
+            out[key] = int(pid)
+        return out
+    except Exception:
+        return out
+
+def get_player_id(ruolo: str, nome: str) -> int | None:
+    """Restituisce l'Id del giocatore dal file 2 incrociando Ruolo ('R') e Nome."""
+    try:
+        idx = build_id_index()
+        key = f"{(ruolo or '').strip().upper()[:1]}|{name_key(nome)}"
+        return idx.get(key)
+    except Exception:
+        return None
+
 def get_all_metrics(ruolo: str, nome: str) -> Dict[str, object]:
     try:
         idx = build_extra_index()
@@ -656,6 +712,51 @@ with tab_riepilogo:
                     st.markdown("\n".join(f"- {x}" for x in items))
                 else:
                     st.markdown(f"**{label}**: _nessuno_")
+
+st.markdown("---")
+st.subheader("📦 Esporta rose per LegheFantacalcio")
+
+if lega_completa():
+    # Costruisci righe: squadra;id_giocatore;crediti
+    rows = []
+    missing = []  # quelli senza Id
+    for team in st.session_state.squadre:
+        for r in RUOLI:
+            for g in team.rosa[r]:
+                pid = get_player_id(r, g.nome)
+                if pid is not None:
+                    rows.append({"squadra": team.nome, "id_giocatore": pid, "crediti": int(g.prezzo)})
+                else:
+                    missing.append({"squadra": team.nome, "ruolo": r, "giocatore": g.nome, "crediti": int(g.prezzo)})
+
+    if not rows:
+        st.warning("Nessuna riga da esportare. Controlla che le rose siano popolate.")
+    else:
+        # CSV principale (sep=';')
+        buf = io.StringIO()
+        pd.DataFrame(rows).to_csv(buf, index=False, sep=';')
+        csv_bytes = buf.getvalue().encode("utf-8")
+
+        st.download_button(
+            "⬇️ Scarica CSV per LegheFantacalcio (squadra;id_giocatore;crediti)",
+            data=csv_bytes,
+            file_name="rose_leghefantacalcio.csv",
+            mime="text/csv"
+        )
+
+        # Eventuali righe senza Id: report e CSV d’appoggio
+        if missing:
+            st.warning(f"{len(missing)} giocatori non hanno trovato l'Id nel file 2 (sheet 'Tutti').")
+            buf2 = io.StringIO()
+            pd.DataFrame(missing).to_csv(buf2, index=False, sep=';')
+            st.download_button(
+                "⬇️ Scarica elenco senza Id (per verifica)",
+                data=buf2.getvalue().encode("utf-8"),
+                file_name="mancano_id.csv",
+                mime="text/csv"
+            )
+else:
+    st.info("Completa tutte le rose (3P/8D/8C/6A per 10 squadre) per sbloccare l'esportazione.")
 
 # ===============================
 # TAB: NOMI SQUADRE (rinomina)
