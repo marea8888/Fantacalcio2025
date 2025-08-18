@@ -197,6 +197,8 @@ def rosa_completa(team: Squadra) -> bool:
         for r in RUOLI
     )  # <-- chiudi con ")"
 
+def lega_completa() -> bool:
+    return all(rosa_completa(t) for t in st.session_state.squadre)
 
 def crediti_rimasti(team: Squadra) -> int:
     spesi = sum(g.prezzo for r in RUOLI for g in team.rosa[r])
