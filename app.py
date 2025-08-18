@@ -430,11 +430,8 @@ def build_extra_index() -> Dict[str, Dict[str, object]]:
 @st.cache_data(show_spinner=False)
 def build_id_index() -> Dict[str, int]:
     """
-    Crea mapping dal file 2 (sheet 'Tutti') usando ESATTAMENTE:
-    - Ruolo: colonna 'R' (prima lettera P/D/C/A)
-    - Nome : colonna 'Nome'
-    - Id   : colonna 'Id'
-    Chiave: 'R|name_key(Nome)' -> Id (int)
+    Crea mapping dal file 2 (sheet 'Tutti'):
+    chiave = 'R|name_key(Nome)' → Id (int)
     """
     out: Dict[str, int] = {}
     try:
@@ -442,7 +439,7 @@ def build_id_index() -> Dict[str, int]:
         if df is None or df.empty:
             return out
 
-        # Trova colonne (case-insensitive sui nomi esatti)
+        # trova colonne con match case-insensitive
         def find_col(targets):
             tset = {str(t).strip().lower() for t in targets}
             for c in df.columns:
@@ -452,7 +449,7 @@ def build_id_index() -> Dict[str, int]:
 
         col_nome = find_col(["Nome"]) or find_col(["name"])
         col_ruolo = find_col(["R"])
-        col_id    = find_col(["Id", "ID", "id"])
+        col_id    = find_col(["Id","ID","id"])
         if not (col_nome and col_ruolo and col_id):
             return out
 
@@ -473,14 +470,16 @@ def build_id_index() -> Dict[str, int]:
     except Exception:
         return out
 
+
 def get_player_id(ruolo: str, nome: str) -> int | None:
-    """Restituisce l'Id del giocatore dal file 2 incrociando Ruolo ('R') e Nome."""
+    """Restituisce l'Id del giocatore incrociando Ruolo ('R') e Nome (sheet 'Tutti')."""
     try:
         idx = build_id_index()
         key = f"{(ruolo or '').strip().upper()[:1]}|{name_key(nome)}"
         return idx.get(key)
     except Exception:
         return None
+
 
 def get_all_metrics(ruolo: str, nome: str) -> Dict[str, object]:
     try:
@@ -715,13 +714,13 @@ with tab_riepilogo:
                 else:
                     st.markdown(f"**{label}**: _nessuno_")
 
-st.markdown("---")
-st.subheader("📦 Esporta rose per LegheFantacalcio")
-
-if lega_completa():
-    # Costruisci righe: squadra;id_giocatore;crediti
+    st.markdown("---")
+    st.subheader("📦 Esporta rose per LegheFantacalcio (senza vincoli)")
+    
+    # Costruisce SEMPRE il CSV: squadra;id_giocatore;crediti
     rows = []
-    missing = []  # quelli senza Id
+    missing = []  # giocatori senza Id nel file 2
+    
     for team in st.session_state.squadre:
         for r in RUOLI:
             for g in team.rosa[r]:
@@ -730,35 +729,30 @@ if lega_completa():
                     rows.append({"squadra": team.nome, "id_giocatore": pid, "crediti": int(g.prezzo)})
                 else:
                     missing.append({"squadra": team.nome, "ruolo": r, "giocatore": g.nome, "crediti": int(g.prezzo)})
-
-    if not rows:
-        st.warning("Nessuna riga da esportare. Controlla che le rose siano popolate.")
-    else:
-        # CSV principale (sep=';')
+    
+    if rows:
         buf = io.StringIO()
-        pd.DataFrame(rows).to_csv(buf, index=False, sep=';')
-        csv_bytes = buf.getvalue().encode("utf-8")
-
+        pd.DataFrame(rows, columns=["squadra","id_giocatore","crediti"]).to_csv(buf, index=False, sep=';')
         st.download_button(
-            "⬇️ Scarica CSV per LegheFantacalcio (squadra;id_giocatore;crediti)",
-            data=csv_bytes,
+            "⬇️ Scarica CSV – formato: squadra;id_giocatore;crediti",
+            data=buf.getvalue().encode("utf-8"),
             file_name="rose_leghefantacalcio.csv",
             mime="text/csv"
         )
-
-        # Eventuali righe senza Id: report e CSV d’appoggio
-        if missing:
-            st.warning(f"{len(missing)} giocatori non hanno trovato l'Id nel file 2 (sheet 'Tutti').")
-            buf2 = io.StringIO()
-            pd.DataFrame(missing).to_csv(buf2, index=False, sep=';')
-            st.download_button(
-                "⬇️ Scarica elenco senza Id (per verifica)",
-                data=buf2.getvalue().encode("utf-8"),
-                file_name="mancano_id.csv",
-                mime="text/csv"
-            )
-else:
-    st.info("Completa tutte le rose (3P/8D/8C/6A per 10 squadre) per sbloccare l'esportazione.")
+    else:
+        st.info("Nessun giocatore assegnato ancora: aggiungi almeno un acquisto per generare il CSV.")
+    
+    # Report facoltativo dei giocatori senza Id
+    if missing:
+        st.warning(f"{len(missing)} giocatori non hanno trovato l'Id nel file 2 (sheet 'Tutti').")
+        buf2 = io.StringIO()
+        pd.DataFrame(missing).to_csv(buf2, index=False, sep=';')
+        st.download_button(
+            "⬇️ Scarica elenco SENZA Id (per verifica)",
+            data=buf2.getvalue().encode("utf-8"),
+            file_name="mancano_id.csv",
+            mime="text/csv"
+        )
 
 # ===============================
 # TAB: NOMI SQUADRE (rinomina)
