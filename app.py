@@ -1108,37 +1108,6 @@ with tab_asta:
                             if _valid(fvm_extra):
                                 st.write(f"**FVM**: {fvm_extra}")
 
-                        # --- Probabili formazioni Fantacalcio.it ---
-                        team_col = cols_lower.get('team')
-                        team_name = None
-                        try:
-                            if team_col and team_col in df_view.columns:
-                                val = rec[team_col]
-                                if pd.notna(val) and str(val).strip():
-                                    team_name = str(val).strip()
-                        except Exception:
-                            team_name = None
-                        
-                        if team_name:
-                            with st.expander("📋 Probabili formazioni (Fantacalcio)", expanded=False):
-                                pf = fetch_prob_form_fc(team_name)
-                                if pf:
-                                    if pf.get("modulo"):
-                                        st.write(f"**Modulo**: {pf['modulo']}")
-                                    if pf.get("xi"):
-                                        st.write(f"**XI**: {pf['xi']}")
-                                    if pf.get("ballottaggi"):
-                                        st.caption(f"**Ballottaggi**: {pf['ballottaggi']}")
-                                    if pf.get("rigoristi"):
-                                        st.caption(f"**Rigoristi**: {pf['rigoristi']}")
-                                    if pf.get("palle_inattive"):
-                                        st.caption(f"**Calci da fermo**: {pf['palle_inattive']}")
-                                    if pf.get("source_url"):
-                                        st.markdown(f"[Fonte: Fantacalcio.it]({pf['source_url']})")
-                                else:
-                                    st.caption("Non trovato per questa squadra. Apri la pagina generale:")
-                                    st.markdown("[Probabili formazioni – Fantacalcio.it](https://www.fantacalcio.it/probabili-formazioni-serie-a)")
-                        
                         # --- Descrizione Fantacalcio (in chiave Fantacalcio) ---
                         team_col = cols_lower.get('team')
                         team_name = None
@@ -1159,9 +1128,8 @@ with tab_asta:
                         if team_slug and player_slug and pid:
                             desc = fetch_fc_description(team_slug, player_slug, pid)
                             if desc.get("text"):
-                                with st.expander("📘 Descrizione (Fantacalcio)", expanded=False):
-                                    st.write(desc["text"])
-                                    st.caption(f"[Fonte: Fantacalcio]({desc['url']})")
+                                st.write(desc["text"])
+                                st.caption(f"[Fonte: Fantacalcio]({desc['url']})")
                         else:
                             st.caption("Descrizione Fantacalcio non disponibile (manca team/ID).")
 
