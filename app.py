@@ -2,6 +2,7 @@ import re
 import json
 import unicodedata
 import io
+import requests
 from bs4 import BeautifulSoup
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict
