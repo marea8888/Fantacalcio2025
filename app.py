@@ -1129,7 +1129,6 @@ with tab_asta:
                             desc = fetch_fc_description(team_slug, player_slug, pid)
                             if desc.get("text"):
                                 st.write(desc["text"])
-                                st.caption(f"[Fonte: Fantacalcio]({desc['url']})")
                         else:
                             st.caption("Descrizione Fantacalcio non disponibile (manca team/ID).")
 
