@@ -90,6 +90,92 @@ def name_key(s: str) -> str:
 def canon_colname(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", str(s).lower())
 
+def slugify(s: str) -> str:
+    """slug web: minuscolo, senza accenti, spazi -> '-'."""
+    s = strip_accents(str(s)).lower().strip()
+    s = re.sub(r"[^a-z0-9]+", "-", s)
+    s = re.sub(r"-{2,}", "-", s).strip("-")
+    return s
+
+def team_to_fc_slug(team_name: str) -> str | None:
+    """Mappa nomi squadra -> slug Fantacalcio; fallback: slugify(name)."""
+    if not team_name:
+        return None
+    t = strip_accents(str(team_name)).upper().strip()
+    # alias comuni → slug “ufficiale” usato da Fantacalcio
+    alias = {
+        "HELLAS VERONA": "verona",
+        "VERONA": "verona",
+        "AS ROMA": "roma",
+        "ROMA": "roma",
+        "AC MILAN": "milan",
+        "MILAN": "milan",
+        "FC INTER": "inter",
+        "INTER": "inter",
+        "SSC NAPOLI": "napoli",
+        "NAPOLI": "napoli",
+        "JUVENTUS": "juventus",
+        "LAZIO": "lazio",
+        "ATALANTA": "atalanta",
+        "FIORENTINA": "fiorentina",
+        "GENOA": "genoa",
+        "BOLOGNA": "bologna",
+        "MONZA": "monza",
+        "LECCE": "lecce",
+        "EMPOLI": "empoli",
+        "UDINESE": "udinese",
+        "TORINO": "torino",
+        "CAGLIARI": "cagliari",
+        "CREMONESE": "cremonese",
+        "COMO": "como",
+        "PARMA": "parma",
+        "SASSUOLO": "sassuolo",
+    }
+    for k, v in alias.items():
+        if t == k or t.startswith(k):
+            return v
+    return slugify(team_name)
+
+# --- ID dal "file 2" (sheet 'Tutti') ---
+@st.cache_data(show_spinner=False)
+def build_id_index() -> Dict[str, int]:
+    """Chiave: 'R|name_key(Nome)' -> Id (int) dal file 2 ('Tutti')."""
+    out: Dict[str, int] = {}
+    try:
+        df = load_all_extra_df()
+        if df is None or df.empty:
+            return out
+
+        # trova colonne case-insensitive
+        def find_col(targets):
+            tset = {str(t).strip().lower() for t in targets}
+            for c in df.columns:
+                if str(c).strip().lower() in tset:
+                    return c
+            return None
+
+        col_nome  = find_col(["Nome"]) or find_col(["name"])
+        col_ruolo = find_col(["R"])
+        col_id    = find_col(["Id","ID","id"])
+        if not (col_nome and col_ruolo and col_id):
+            return out
+
+        role_first = df[col_ruolo].astype(str).str.strip().str.upper().str[:1]
+        ids = pd.to_numeric(df[col_id], errors="coerce").astype("Int64")
+
+        for i, row in df.iterrows():
+            r = role_first.iloc[i]
+            if r not in RUOLI: 
+                continue
+            nome_k = name_key(row[col_nome])
+            pid = ids.iloc[i]
+            if pd.isna(pid):
+                continue
+            out[f"{r}|{nome_k}"] = int(pid)
+        return out
+    except Exception:
+        return out
+
 # ===============================
 # DATA MODEL
 # ===============================
@@ -604,6 +690,58 @@ def fetch_prob_form_fc(team_name: str) -> dict:
     except Exception:
         return {}
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_fc_description(team_slug: str, player_slug: str, player_id: int) -> dict:
+    """
+    Scarica la pagina:
+    https://www.fantacalcio.it/serie-a/squadre/{team_slug}/{player_slug}/{player_id}
+    e prova a estrarre la sezione '... in chiave Fantacalcio'.
+    """
+    out = {"text": None, "url": None}
+    if not (team_slug and player_slug and player_id):
+        return out
+    url = f"https://www.fantacalcio.it/serie-a/squadre/{team_slug}/{player_slug}/{int(player_id)}"
+    try:
+        r = requests.get(url, timeout=8, headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200:
+            return out
+        soup = BeautifulSoup(r.text, "lxml")
+
+        # Cerca un h2/h3/h4 che contenga 'chiave fantacalcio'
+        hdr = None
+        for tag in soup.find_all(["h2", "h3", "h4"]):
+            if tag.get_text(strip=True).lower().find("chiave fantacalcio") >= 0:
+                hdr = tag
+                break
+
+        if not hdr:
+            # fallback: cerca 'Descrizione' o simili
+            for tag in soup.find_all(["h2", "h3", "h4"]):
+                if "descrizione" in tag.get_text(strip=True).lower():
+                    hdr = tag
+                    break
+
+        if not hdr:
+            return out
+
+        # Raccogli i fratelli fino al prossimo header
+        text_chunks = []
+        for sib in hdr.next_siblings:
+            if getattr(sib, "name", None) in ("h2", "h3", "h4"):
+                break
+            if getattr(sib, "name", None) in ("p", "ul", "ol", "div"):
+                txt = sib.get_text("\n", strip=True)
+                if txt:
+                    text_chunks.append(txt)
+
+        full_txt = "\n".join(text_chunks).strip()
+        if full_txt:
+            out["text"] = full_txt
+            out["url"] = url
+        return out
+    except Exception:
+        return out
+
 # ===============================
 # AUTO REFRESH (ogni tot secondi, invisibile)
 # ===============================
@@ -1000,7 +1138,32 @@ with tab_asta:
                                     st.caption("Non trovato per questa squadra. Apri la pagina generale:")
                                     st.markdown("[Probabili formazioni – Fantacalcio.it](https://www.fantacalcio.it/probabili-formazioni-serie-a)")
                         
+                        # --- Descrizione Fantacalcio (in chiave Fantacalcio) ---
+                        team_col = cols_lower.get('team')
+                        team_name = None
+                        try:
+                            if team_col and team_col in df_view.columns:
+                                val = rec[team_col]
+                                if pd.notna(val) and str(val).strip():
+                                    team_name = str(val).strip()
+                        except Exception:
+                            team_name = None
                         
+                        player_name = str(rec[NAME_COL]).strip()
+                        pid = get_player_id(ruolo_asta, player_name)
+                        
+                        team_slug = team_to_fc_slug(team_name) if team_name else None
+                        player_slug = slugify(player_name)
+                        
+                        if team_slug and player_slug and pid:
+                            desc = fetch_fc_description(team_slug, player_slug, pid)
+                            if desc.get("text"):
+                                with st.expander("📘 Descrizione (Fantacalcio)", expanded=False):
+                                    st.write(desc["text"])
+                                    st.caption(f"[Fonte: Fantacalcio]({desc['url']})")
+                        else:
+                            st.caption("Descrizione Fantacalcio non disponibile (manca team/ID).")
+
                         st.markdown("---")
                         st.subheader("📝 Assegna a squadra")
                         team_options = list(range(len(st.session_state.squadre)))
