@@ -833,25 +833,27 @@ tab_asta, tab_call, tab_riepilogo, tab_nomi = st.tabs([
 ])
 
 # ===============================
-# TAB: RIEPILOGO (tutte le squadre)
+# TAB: RIEPILOGO (tutte le squadre) — con pulsante Rimuovi
 # ===============================
 with tab_riepilogo:
-    for team in st.session_state.squadre:
+    for t_idx, team in enumerate(st.session_state.squadre):
         with st.expander(f"{team.nome} – Crediti rimasti: {crediti_rimasti(team)}", expanded=False):
-            # Lista con Slot e prezzo per ogni reparto
             for r, label in [("P","Portieri"),("D","Difensori"),("C","Centrocampisti"),("A","Attaccanti")]:
-                items = []
-                for g in team.rosa[r]:
-                    _slot = get_slot_for(g.nome, r)
-                    if _slot:
-                        items.append(f"{g.nome} — Slot {_slot} ({g.prezzo})")
-                    else:
-                        items.append(f"{g.nome} ({g.prezzo})")
-                if items:
-                    st.markdown(f"**{label}**")
-                    st.markdown("\n".join(f"- {x}" for x in items))
+                st.markdown(f"**{label}**")
+                if team.rosa[r]:
+                    for i, g in enumerate(team.rosa[r]):
+                        c1, c2, c3 = st.columns([6,2,1])
+                        c1.write(g.nome)
+                        c2.write(f"{g.prezzo} crediti")
+                        if c3.button("🗑️", key=f"rm_{t_idx}_{r}_{i}"):
+                            if rimuovi_giocatore(team, r, g.nome):
+                                st.success(f"{g.nome} rimosso da {team.nome}.")
+                                st.rerun()
+                            else:
+                                st.error("Impossibile rimuovere il giocatore.")
                 else:
-                    st.markdown(f"**{label}**: _nessuno_")
+                    st.write("_nessuno_")
+
 
     st.markdown("---")
     st.subheader("📦 Esporta rose per LegheFantacalcio (senza vincoli)")
