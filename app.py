@@ -36,7 +36,7 @@ SETTINGS = {
 }
 
 # Google Drive: file Excel con i fogli P/D/C/A e colonna "name"
-FILE_ID = "1zI1mBV3ttMLS_sbvmBRwe4WRncEtCXX3"
+FILE_ID = "1xh19qAkMpLwB1QziSRUsvkKe98bJtSwR"
 DRIVE_XLSX_URL = f"https://drive.google.com/uc?export=download&id={FILE_ID}"
 
 # Secondo file (Tutti): extra metrics (Qt.A, FVM)
