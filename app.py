@@ -825,7 +825,7 @@ with st.sidebar:
 # ===============================
 # UI: HEADER + TABS IN ALTO
 # ===============================
-st.title("Fanta Gioia 2025/2026")
+st.title("Fantacalcio 2025/2026")
 
 # Ordine: Asta come tab predefinito
 tab_asta, tab_call, tab_riepilogo, tab_nomi = st.tabs([
