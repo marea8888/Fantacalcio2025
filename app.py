@@ -28,7 +28,7 @@ RUOLI = ["P", "D", "C", "A"]
 QUOTE_ROSA = {"P": 3, "D": 8, "C": 8, "A": 6}
 SETTINGS = {
     "num_squadre": 10,
-    "crediti": 700,
+    "crediti": 500,
     "quote_rosa": QUOTE_ROSA.copy(),
     "no_doppioni": True,  # un giocatore può appartenere ad una sola squadra
     # Target personali (solo per Terzetto Scherzetto)
@@ -248,14 +248,14 @@ if "_boot" not in st.session_state:
         def _init_default_squadre() -> List[Squadra]:
             arr = []
             for i in range(st.session_state.settings["num_squadre"]):
-                nome = "Terzetto Scherzetto" if i == 0 else f"Squadra {i+1}"
+                nome = "Robin Hood Miami" if i == 0 else f"Squadra {i+1}"
                 arr.append(Squadra(nome, st.session_state.settings["crediti"]))
             return arr
         st.session_state.squadre = _init_default_squadre()
         st.session_state.storico_acquisti = []
         default_idx = 0
         for i, t in enumerate(st.session_state.squadre):
-            if t.nome == "Terzetto Scherzetto":
+            if t.nome == "Robin Hood Miami":
                 default_idx = i
                 break
         st.session_state.my_team_idx = default_idx
@@ -267,7 +267,7 @@ if "_boot" not in st.session_state:
     if len(st.session_state.squadre) < desired:
         start_i = len(st.session_state.squadre)
         for i in range(start_i, desired):
-            nome = "Terzetto Scherzetto" if i == 0 else f"Squadra {i+1}"
+            nome = "Robin Hood Miami" if i == 0 else f"Squadra {i+1}"
             st.session_state.squadre.append(Squadra(nome, st.session_state.settings["crediti"]))
         save_state()
     st.session_state._boot = True
